@@ -1,0 +1,57 @@
+[
+  {
+    "parts": [],
+    "tags": [
+      "#EXT-X-TARGETDURATION:10",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,"
+    ],
+    "mediaId": "HLS"
+  },
+  {
+    "parts": [
+      "#EXT-X-PART:DURATION=1.000000,",
+      "#EXT-X-PART:DURATION=1.000000,",
+      "#EXT-X-PART:DURATION=1.000000,",
+      "#EXT-X-PART:DURATION=1.000000,",
+      "#EXT-X-PART:DURATION=1.000000,",
+      "#EXT-X-PART:DURATION=1.000000,",
+      "#EXT-X-PART:DURATION=1.000000,",
+      "#EXT-X-PART:DURATION=1.000000,"
+    ],
+    "tags": [
+      "#EXT-X-TARGETDURATION:10",
+      "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=3.008000",
+      "#EXT-X-PART-INF:PART-TARGET=1.000000",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,",
+      "#EXTINF:2.000000,"
+    ],
+    "mediaId": "LLHLS"
+  }
+]

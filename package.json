@@ -1,0 +1,12 @@
+{
+  "name": "chzzk-catchup",
+  "version": "0.3.8",
+  "private": true,
+  "description": "CHZZK automatic playback-rate catch-up and live latency",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node tools/check.mjs",
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/package.ps1"
+  },
+  "engines": { "node": ">=20" }
+}

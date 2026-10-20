@@ -1,0 +1,117 @@
+﻿{
+    "checkedAtUtc":  "2026-10-14T12:56:29.1271666+00:00",
+    "scope":  "Public live API and one video rendition per HLS/LLHLS entry; no media segments downloaded",
+    "limitations":  [
+                        "PDT origin is not verified as camera capture time",
+                        "This does not identify the active Firefox playback route",
+                        "Edge age depends on client and stream clock alignment and is not glass-to-glass latency"
+                    ],
+    "results":  [
+                    {
+                        "channelId":  "7ce8032370ac5121dcabce7bad375ced",
+                        "liveId":  21642345,
+                        "status":  "OPEN",
+                        "mediaId":  "HLS",
+                        "variantSelection":  "first listed video variant",
+                        "timing":  {
+                                       "observedAtUtc":  "2026-10-14T12:56:28.8894117+00:00",
+                                       "host":  "nvelop-livecloud.pstatic.net",
+                                       "serverDate":  "Wed, 14 Oct 2026 12:56:31 GMT",
+                                       "cacheAge":  "",
+                                       "programDateTimeTagCount":  15,
+                                       "firstProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:56:00.256Z",
+                                       "lastProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:56:29.306Z",
+                                       "segmentCount":  15,
+                                       "segmentsWithMappedTime":  15,
+                                       "partCount":  0,
+                                       "targetDurationTag":  "#EXT-X-TARGETDURATION:10",
+                                       "serverControlTag":  "",
+                                       "latestAdvertisedMediaTimeUtc":  "2026-10-14T12:56:31.3060000+00:00",
+                                       "advertisedEdgeAgeSeconds":  -2.417
+                                   }
+                    },
+                    {
+                        "channelId":  "7ce8032370ac5121dcabce7bad375ced",
+                        "liveId":  21642345,
+                        "status":  "OPEN",
+                        "mediaId":  "LLHLS",
+                        "variantSelection":  "first listed video variant",
+                        "timing":  {
+                                       "observedAtUtc":  "2026-10-14T12:56:28.9676641+00:00",
+                                       "host":  "nvelop-livecloud.pstatic.net",
+                                       "serverDate":  "Wed, 14 Oct 2026 12:56:31 GMT",
+                                       "cacheAge":  "",
+                                       "programDateTimeTagCount":  15,
+                                       "firstProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:56:00.256Z",
+                                       "lastProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:56:29.306Z",
+                                       "segmentCount":  15,
+                                       "segmentsWithMappedTime":  15,
+                                       "partCount":  9,
+                                       "targetDurationTag":  "#EXT-X-TARGETDURATION:10",
+                                       "serverControlTag":  "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=3.051000",
+                                       "latestAdvertisedMediaTimeUtc":  "2026-10-14T12:56:32.3060000+00:00",
+                                       "advertisedEdgeAgeSeconds":  -3.338
+                                   }
+                    },
+                    {
+                        "channelId":  "3f162005318a0b0c50db9dcdc2a83ea7",
+                        "liveId":  21641730,
+                        "status":  "OPEN",
+                        "mediaId":  "HLS",
+                        "variantSelection":  "first listed video variant",
+                        "timing":  {
+                                       "observedAtUtc":  "2026-10-14T12:56:29.0315432+00:00",
+                                       "host":  "nvelop-livecloud.pstatic.net",
+                                       "serverDate":  "Wed, 14 Oct 2026 12:56:32 GMT",
+                                       "cacheAge":  "",
+                                       "programDateTimeTagCount":  8,
+                                       "firstProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:55:58.096Z",
+                                       "lastProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:56:27.263Z",
+                                       "segmentCount":  8,
+                                       "segmentsWithMappedTime":  8,
+                                       "partCount":  0,
+                                       "targetDurationTag":  "#EXT-X-TARGETDURATION:10",
+                                       "serverControlTag":  "",
+                                       "latestAdvertisedMediaTimeUtc":  "2026-10-14T12:56:31.4300000+00:00",
+                                       "advertisedEdgeAgeSeconds":  -2.398
+                                   }
+                    },
+                    {
+                        "channelId":  "3f162005318a0b0c50db9dcdc2a83ea7",
+                        "liveId":  21641730,
+                        "status":  "OPEN",
+                        "mediaId":  "LLHLS",
+                        "variantSelection":  "first listed video variant",
+                        "timing":  {
+                                       "observedAtUtc":  "2026-10-14T12:56:29.0963754+00:00",
+                                       "host":  "nvelop-livecloud.pstatic.net",
+                                       "serverDate":  "Wed, 14 Oct 2026 12:56:32 GMT",
+                                       "cacheAge":  "",
+                                       "programDateTimeTagCount":  8,
+                                       "firstProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:55:58.096Z",
+                                       "lastProgramDateTimeTag":  "#EXT-X-PROGRAM-DATE-TIME:2026-10-14T12:56:27.263Z",
+                                       "segmentCount":  8,
+                                       "segmentsWithMappedTime":  8,
+                                       "partCount":  21,
+                                       "targetDurationTag":  "#EXT-X-TARGETDURATION:10",
+                                       "serverControlTag":  "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=3.051000",
+                                       "latestAdvertisedMediaTimeUtc":  "2026-10-14T12:56:32.4300000+00:00",
+                                       "advertisedEdgeAgeSeconds":  -3.334
+                                   }
+                    },
+                    {
+                        "channelId":  "a67b328bcc8eea4451ccfa754bc19ae1",
+                        "liveId":  21638778,
+                        "mediaId":  "HLS",
+                        "error":  "Playlist inspection failed",
+                        "errorType":  "RuntimeException"
+                    },
+                    {
+                        "channelId":  "a67b328bcc8eea4451ccfa754bc19ae1",
+                        "liveId":  21638778,
+                        "mediaId":  "LLHLS",
+                        "error":  "Playlist inspection failed",
+                        "errorType":  "RuntimeException"
+                    }
+                ]
+}
