@@ -355,7 +355,6 @@ test("a five-second seek timeout remains unconfirmed", async () => {
   const state = (await app.send("get-status")).status;
   assert.equal(state.seeking, false);
   assert.equal(state.lastResult.completed, false);
-  assert.equal((await app.send("get-log")).log.samples.some((sample) => sample.type === "catch-up-timeout"), true);
 });
 
 test("seeked at a different position cannot confirm the requested target", async () => {
@@ -368,9 +367,6 @@ test("seeked at a different position cannot confirm the requested target", async
   assert.equal(state.lastResult.completed, false);
   assert.equal(state.lastResult.actualCurrentTime, 97.4);
   assert.equal(state.lastResult.targetDistance, -2);
-  const sample = (await app.send("get-log")).log.samples.find((entry) => entry.type === "catch-up-seeked");
-  assert.equal(sample.actualCurrentTime, 97.4);
-  assert.equal(sample.targetDistance, -2);
 });
 
 test("no persistent catch-up overlay is added to the page or native fullscreen video", async () => {
@@ -402,7 +398,6 @@ test("source changes and player replacement cancel pending confirmation", async 
   const cancelled = (await emptied.send("get-status")).status;
   assert.equal(cancelled.seeking, false);
   assert.equal(cancelled.lastResult.completed, false);
-  assert.equal((await emptied.send("get-log")).log.samples.some((sample) => sample.type === "catch-up-source-changed"), true);
 
   const replaced = await harness();
   await replaced.send("catch-up");
@@ -417,19 +412,10 @@ test("source changes and player replacement cancel pending confirmation", async 
   assert.deepEqual(nextVideo.seekWrites, []);
 });
 
-test("diagnostic export caps samples and excludes remote media URLs and queries", async () => {
+test("removed diagnostic messages are rejected", async () => {
   const app = await harness();
-  app.advance(1205 * 1000);
-  const result = await app.send("get-log");
-  assert.equal(result.log.samples.length, 1200);
-  assert.equal(result.log.samples.every((sample) => sample.type === "sample"), true);
-  assert.equal(result.log.path, "/live/channel-id");
-  const serialized = JSON.stringify(result.log);
-  assert.equal(serialized.includes(REMOTE_MEDIA_URL), false);
-  assert.equal(serialized.includes("private-token"), false);
-  assert.equal(serialized.includes("https://"), false);
-  await app.send("clear-log");
-  assert.equal((await app.send("get-log")).log.samples.length, 0);
+  assert.equal((await app.send("get-log")).ok, false);
+  assert.equal((await app.send("clear-log")).ok, false);
 });
 
 test("automatic catch-up defaults on and changes speed without seeking", async () => {
@@ -619,8 +605,7 @@ test("steady buffer replenishment while playback advances does not end automatic
     app.advance(1000);
     assert.equal(app.video.playbackRate, 1.5, `second ${index + 1}`);
   }
-  assert.equal((await app.send("get-log")).log.samples.some(
-    sample => sample.type === "auto-stopped" && sample.reason === "no-progress"), false);
+  assert.equal((await app.send("get-status")).status.lastAutoStop, null);
 });
 
 test("a network stalled event does not stop healthy buffered playback or latch a waiting state", async () => {
@@ -718,7 +703,6 @@ test("healthy automatic playback stays uninterrupted past 60 seconds and still s
   }
   assert.equal((await app.send("get-status")).status.autoActive, true);
   assert.deepEqual(app.video.rateWrites, [1.5]);
-  assert.equal((await app.send("get-log")).log.samples.some(sample => sample.type === "auto-stopped"), false);
   app.video.buffered = ranges([[88, app.video.currentTime + 0.5]]);
   app.advance(250);
   assert.equal(app.video.playbackRate, 1);
@@ -840,7 +824,7 @@ test("the native-control label receives only fresh player latency and never subs
   assert.equal((await app.send("get-status")).status.edgeDistance, 10);
 });
 
-test("label and popup use the recent average while diagnostic samples preserve the raw measurement", async () => {
+test("label and popup use the recent average while status preserves the raw measurement", async () => {
   const app = await harness();
   app.respondLatency(2);
   app.advance(1000);
@@ -852,9 +836,9 @@ test("label and popup use the recent average while diagnostic samples preserve t
   assert.equal(state.latencySampleCount, 2);
   assert.equal(state.latencyWindowSeconds, 5);
   app.advance(1000);
-  const log = (await app.send("get-log")).log;
-  assert.equal(log.samples.at(-1).playerLatency, 3);
-  assert.equal(log.samples.at(-1).playerLatencyRaw, 4);
+  state = (await app.send("get-status")).status;
+  assert.equal(state.playerLatency, 3);
+  assert.equal(state.playerLatencyRaw, 4);
   app.respondLatency(null);
   state = (await app.send("get-status")).status;
   assert.equal(state.playerLatency, null);
@@ -863,7 +847,7 @@ test("label and popup use the recent average while diagnostic samples preserve t
 });
 
 test("seek, waiting, source changes and channel changes discard the previous latency average", async () => {
-  for (const event of ["seeking", "seeked", "waiting", "playing", "pause", "ratechange", "emptied", "loadedmetadata"]) {
+  for (const event of ["seeking", "seeked", "waiting", "playing", "ratechange", "emptied", "loadedmetadata"]) {
     const app = await harness();
     app.respondLatency(6);
     app.video.emit(event);
@@ -947,9 +931,6 @@ test("entry catch-up uses the saved 0.2-second margin once, independently of aut
   app.video.buffered = ranges([[88, 120]]);
   await progress(app, 5);
   assert.deepEqual(app.video.seekWrites, [99.8]);
-  const requests = (await app.send("get-log")).log.samples.filter(s => s.type === "catch-up-request");
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].trigger, "startup");
   assert.equal((await app.send("get-status")).status.startupPending, false);
 });
 
@@ -1222,8 +1203,7 @@ test("repeated buffering raises only this broadcast's effective margin and autom
   await app.send("catch-up");
   assert.deepEqual(app.video.seekWrites, [98.4]);
   app.video.emit("seeked");
-  const log = (await app.send("get-log")).log;
-  assert.equal(log.samples.filter(s => s.type === "buffer-increased").length, 1);
+  assert.equal((await app.send("get-status")).status.effectiveMargin, 1.6);
   app.location.pathname = "/live/new-broadcast";
   state = (await app.send("get-status")).status;
   assert.equal(state.effectiveMargin, 0.6);
@@ -1272,4 +1252,52 @@ test("buffer adjustment can be reset or disabled and uses the configured cap", a
   app.advance(1250);
   await buffering(app); await buffering(app);
   assert.equal((await app.send("get-status")).status.effectiveMargin, 0.6);
+});
+
+test("pause freezes label and popup metrics, rejects delayed responses and resumes fresh measurements", async () => {
+  const app = await harness();
+  app.respondLatency(2);
+  app.advance(1000);
+  app.respondLatency(4);
+  const before = (await app.send("get-status")).status;
+  app.video.paused = true;
+  app.video.emit("pause");
+  const requests = app.postedMessages.filter(m => m.namespace === "chzzk-catchup-latency-request").length;
+  app.video.buffered = ranges([[88, 150]]);
+  app.video.seekable = ranges([[0, 160]]);
+  app.respondLatency(50);
+  app.advance(15000);
+  const paused = (await app.send("get-status")).status;
+  assert.equal(paused.paused, true);
+  assert.equal(app.labelLatency(), before.playerLatency);
+  assert.equal(app.labelBuffer(), before.forwardBuffer);
+  for (const key of ["playerLatency", "forwardBuffer", "edgeDistance"]) {
+    assert.equal(paused[key], before[key], key);
+  }
+  assert.equal(app.postedMessages.filter(m => m.namespace === "chzzk-catchup-latency-request").length, requests);
+  app.video.paused = false;
+  app.video.emit("playing");
+  assert.equal(app.labelLatency(), null);
+  app.advance(1000);
+  app.respondLatency(8);
+  const resumed = (await app.send("get-status")).status;
+  assert.equal(app.labelLatency(), 8);
+  assert.equal(resumed.playerLatency, 8);
+  assert.equal(resumed.forwardBuffer, 60);
+  assert.equal(resumed.edgeDistance, 70);
+});
+
+test("paused metrics are discarded on channel, player and source changes", async () => {
+  for (const change of ["channel", "player", "source"]) {
+    const app = await harness();
+    app.respondLatency(3);
+    app.video.paused = true;
+    app.video.emit("pause");
+    if (change === "channel") app.location.pathname = "/live/new-channel";
+    if (change === "player") app.document.videos = [makeVideo({ paused: true })];
+    if (change === "source") app.video.emit("emptied");
+    const state = (await app.send("get-status")).status;
+    assert.equal(state.playerLatency, null, change);
+    assert.equal(app.labelLatency(), null, change);
+  }
 });

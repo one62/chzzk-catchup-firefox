@@ -23,8 +23,6 @@ const elements = {
   saveAuto: document.getElementById("save-auto"),
   catchUp: document.getElementById("catch-up"),
   feedback: document.getElementById("feedback"),
-  exportLog: document.getElementById("export-log"),
-  clearLog: document.getElementById("clear-log"),
   connection: document.getElementById("current-connection"),
   streamStatus: document.getElementById("stream-status"),
   streamAuto: document.getElementById("stream-auto"),
@@ -85,7 +83,6 @@ function validGuardSettings() {
 }
 
 function updateControls() {
-  const connected = Boolean(currentStatus);
   const settingsDisabled = busy || !savedSettings;
   elements.margin.disabled = settingsDisabled;
   elements.startupEnabled.disabled = settingsDisabled;
@@ -99,8 +96,6 @@ function updateControls() {
   elements.saveGuard.disabled = settingsDisabled || !guardEdited || !validGuardSettings();
   elements.resetBuffer.disabled = busy || !currentStatus?.isLive ||
     !(currentStatus.effectiveMargin > currentStatus.margin);
-  elements.exportLog.disabled = busy || !connected;
-  elements.clearLog.disabled = busy || !connected;
   elements.catchUp.disabled =
     busy ||
     !currentStatus?.isLive ||
@@ -119,22 +114,22 @@ function showFeedback(message, error = false, persistFor = 0) {
 }
 
 function statusMessage(status) {
-  if (!status.isLive) return "설정은 여기서 저장할 수 있어요. 재생 상태는 라이브 탭에서 확인하세요.";
-  if (!status.videoFound) return "방송 영상을 기다리고 있어요.";
-  if (status.adState === "detected") return "광고가 끝나면 따라잡기를 사용할 수 있어요.";
-  if (status.paused) return "방송을 재생하면 따라잡기를 사용할 수 있어요.";
-  if (status.seeking) return "재생 위치를 이동하고 있어요.";
-  if (status.ended) return "방송 재생이 끝났어요.";
-  if (status.streamChanging) return "연결 방식을 전환 중이에요.";
-  if (status.startupPending) return "재생이 준비되면 설정한 버퍼만 남기고 한 번 당겨요.";
+  if (!status.isLive) return "라이브 탭에서 재생 상태 확인";
+  if (!status.videoFound) return "방송 대기 중";
+  if (status.adState === "detected") return "광고 재생 중";
+  if (status.paused) return "일시정지";
+  if (status.seeking) return "재생 위치 이동 중";
+  if (status.ended) return "재생 종료";
+  if (status.streamChanging) return "연결 전환 중";
+  if (status.startupPending) return "입장 시 따라잡기 대기 중";
   if (status.autoActive) {
     const rate = Number.isFinite(status.playbackRate) ? status.playbackRate : (status.autoRate ?? 1.5);
     const stopBuffer = Number.isFinite(status.autoStopBuffer) ? status.autoStopBuffer
       : autoPolicy.stopBuffer(status.margin);
     return `${rate}배속으로 따라잡는 중 · 종료 기준 ${stopBuffer.toFixed(1)}초`;
   }
-  if (status.autoEnabled === false) return "자동 배속 따라잡기가 꺼져 있어요.";
-  return status.autoReason || status.lastResult?.message || "연속 버퍼가 충분히 쌓이면 자동으로 배속 재생해요.";
+  if (status.autoEnabled === false) return "자동 배속 꺼짐";
+  return "";
 }
 
 function renderStatus(status) {
@@ -181,10 +176,10 @@ async function getActiveTab() {
   try {
     url = new URL(tab.url);
   } catch {
-    throw new Error("설정은 여기서 저장할 수 있어요. 재생 상태는 치지직 라이브 탭에서 확인하세요.");
+    throw new Error("라이브 탭에서 재생 상태 확인");
   }
   if (url.origin !== "https://chzzk.naver.com") {
-    throw new Error("설정은 여기서 저장할 수 있어요. 재생 상태는 치지직 라이브 탭에서 확인하세요.");
+    throw new Error("라이브 탭에서 재생 상태 확인");
   }
   if (currentTabId !== tab.id) {
     currentTabId = tab.id;
@@ -272,17 +267,17 @@ function renderPlaybackInfo() {
   elements.connection.textContent = state?.videoFound ? playbackPolicy.connectionLabel(state.stream?.selectedKind) : "—";
   const mode = savedSettings?.streamMode ?? "auto";
   let info = "";
-  if (state?.streamChanging) info = "전환 중이에요.";
-  else if (state?.streamResult?.ok === false) info = "전환하지 못했어요. 현재 연결을 유지하며 잠시 후 다시 시도해요.";
+  if (state?.streamChanging) info = "전환 중";
+  else if (state?.streamResult?.ok === false) info = "전환 실패 · 재시도 대기";
   else if (state?.stream?.available && !playbackPolicy.matchesMode(state.stream.selectedKind, mode)) {
     info = state.stream.tracks?.some(track => track.kind === playbackPolicy.desiredKind(mode))
-      ? "재생이 준비되면 선택한 방식으로 전환해요." : "선택한 방식이 제공되지 않아 현재 연결을 유지해요.";
+      ? "연결 전환 대기" : "미지원 · 현재 연결 유지";
   }
   elements.streamStatus.textContent = info;
   const base = savedSettings?.margin ?? 0.6;
   elements.bufferStatus.textContent = state?.isLive && Number.isFinite(state.effectiveMargin)
     ? `현재 남길 버퍼 ${state.effectiveMargin.toFixed(1)}초 · 배속 시작 ${Number(state.effectiveAutoStart ?? state.autoStart).toFixed(1)}초`
-    : `기본 남길 버퍼 ${base.toFixed(1)}초 · 자동 증가분은 방송마다 적용돼요.`;
+    : `기본 남길 버퍼 ${base.toFixed(1)}초`;
 }
 
 async function saveSettings(values) {
@@ -405,34 +400,6 @@ elements.resetBuffer.addEventListener("click", () => {
     const response = await send("reset-buffer");
     if (response.status) renderStatus(response.status);
     showFeedback("현재 방송의 남길 버퍼를 기본 설정으로 되돌렸어요.", false, 4000);
-  });
-});
-
-function exportLog() {
-  void performAction(async () => {
-    const response = await send("get-log");
-    if (!response.log || typeof response.log !== "object") {
-      throw new Error("저장할 진단 로그를 확인할 수 없어요.");
-    }
-    const blob = new Blob([JSON.stringify(response.log, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    link.href = url;
-    link.download = `chzzk-catchup-${timestamp}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    showFeedback("진단 로그 JSON을 저장했어요.", false, 4000);
-  });
-}
-elements.exportLog.addEventListener("click", exportLog);
-
-elements.clearLog.addEventListener("click", () => {
-  void performAction(async () => {
-    await send("clear-log");
-    showFeedback("진단 로그를 지웠어요.", false, 4000);
   });
 });
 

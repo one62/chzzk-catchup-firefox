@@ -12,9 +12,7 @@
   let lastBufferAdjustment = null;
   const latencyAverage = globalThis.ChzzkCatchupLatencyAverage.create();
   const monotonicNow = () => performance.now();
-  const MAX_LOG = 1200;
   const token = crypto.randomUUID();
-  const samples = [];
   const videoEvents = ["waiting", "stalled", "playing", "pause", "seeking",
     "seeked", "emptied", "loadedmetadata", "ratechange", "error", "ended"];
   let margin = 0.6;
@@ -25,6 +23,7 @@
   let requestId = 0;
   let playerLatency = null;
   let latencyAt = 0;
+  let displayedMetrics = null;
   let autoSettings = autoPolicy.normalizeSettings({}, margin);
   let settingsReady = false;
   let startupEnabled = true;
@@ -52,8 +51,8 @@
   const streamRequests = new Map();
   const label = globalThis.ChzzkCatchupLabel.create({
     getVideo: () => isLive() ? video : null,
-    getLatency: () => latencyAverage.get(monotonicNow()).value,
-    getBuffer: () => media.forwardBuffer(video),
+    getLatency: () => displayMetrics().playerLatency,
+    getBuffer: () => displayMetrics().forwardBuffer,
     getConnection: () => playbackPolicy.connectionLabel(stream?.selectedKind),
   });
   const rateIndicator = globalThis.ChzzkCatchupRateIndicator.create({
@@ -107,6 +106,16 @@
     return [...markers].some(marker => visible(marker)) ? "detected" : "unknown";
   }
 
+  // Keep the last displayed values across pause and latency-cache resets.
+  function displayMetrics(state = media.snapshot(video)) {
+    if (!video) return { playerLatency: null, forwardBuffer: null, edgeDistance: null };
+    if (!video.paused || !displayedMetrics) {
+      displayedMetrics = { playerLatency: latencyAverage.get(monotonicNow()).value,
+        forwardBuffer: state.forwardBuffer, edgeDistance: state.edgeDistance };
+    }
+    return displayedMetrics;
+  }
+
   function status() {
     const state = media.snapshot(video);
     const now = monotonicNow();
@@ -114,11 +123,11 @@
     return { ...state, isLive: isLive(), videoFound: Boolean(video),
       ended: Boolean(video?.ended),
       seeking: state.seeking || Boolean(pendingSeek), margin, lastResult,
-      playerLatency: averagedLatency.value,
+      ...displayMetrics(state),
       playerLatencyRaw: now - latencyAt <= 2500 ? playerLatency : null,
       latencyWindowSeconds: averagedLatency.windowSeconds,
       latencySampleCount: averagedLatency.sampleCount,
-      adState: adState(), sampleTime: new Date().toISOString(),
+      adState: adState(),
       ...autoSettings, autoActive: Boolean(autoSession), autoReason, lastAutoStop,
       ...playbackSettings, effectiveMargin: effectiveMargin(),
       effectiveAutoStart: effectiveAutoSettings().autoStart, lastBufferAdjustment,
@@ -179,7 +188,6 @@
     }
     lastAutoStop = { reason, message: autoReason, restored,
       durationSeconds: Math.max(0, stoppedAt - session.startedAt) / 1000 };
-    record("auto-stopped", { reason, restored, durationSeconds: lastAutoStop.durationSeconds });
     rateIndicator.update();
   }
 
@@ -232,7 +240,6 @@
       video.playbackRate = autoSession.rate;
       if (!sameRate(video.playbackRate, autoSession.rate)) { stopAuto("rate-failed"); return; }
       autoReason = null;
-      record("auto-started");
     } catch {
       stopAuto("rate-failed");
     }
@@ -255,7 +262,6 @@
     lastBufferAdjustment = adjustment;
     stopAuto("buffer-adjusted");
     autoBlockedUntil = Math.max(autoBlockedUntil, monotonicNow() + 15000);
-    record("buffer-increased", { adjustment });
   }
 
   function ignoreBuffering() {
@@ -295,13 +301,7 @@
     startupPending = false;
     startupPlayback = null;
     if (buffer > effectiveMargin()) catchUp("startup");
-    else record("startup-already-close");
     return true;
-  }
-
-  function record(type, details = {}) {
-    samples.push({ type, path: location.pathname, ...status(), ...details });
-    if (samples.length > MAX_LOG) samples.splice(0, samples.length - MAX_LOG);
   }
 
   function finishSeek(reason) {
@@ -319,13 +319,13 @@
       : "플레이어가 변경되어 이동 결과를 확인할 수 없습니다.",
       completed: reached, target: action.target, actualCurrentTime, targetDistance,
       requestedSkipSeconds: action.skipSeconds };
-    record(`catch-up-${reason}`, { requestedTarget: action.target,
-      before: action.before, actionId: action.id, actualCurrentTime, targetDistance });
     render();
   }
 
   function onVideoEvent(event) {
     if (event.currentTarget !== video) return;
+    if (event.type === "pause") displayMetrics();
+    if (["emptied", "loadedmetadata", "ended", "error"].includes(event.type)) displayedMetrics = null;
     if (event.type === "waiting" && canCountBuffering()) bufferGuard.begin(monotonicNow());
     if (event.type === "playing") { stepBufferGuard(); bufferGuard.cancel(); }
     if (["pause", "seeking", "seeked", "emptied", "loadedmetadata", "ended", "error"].includes(event.type)) ignoreBuffering();
@@ -378,7 +378,6 @@
       resetLatency();
       if (event.type === "emptied") finishSeek("source-changed");
     }
-    record(`media-${event.type}`);
     if (event.type === "seeked") finishSeek("seeked");
     render();
   }
@@ -390,6 +389,7 @@
       stopAuto("page-changed");
       finishSeek("page-changed");
       path = nextPath;
+      displayedMetrics = null;
       resetBufferGuard();
       startupPending = true;
       startupPlayback = null;
@@ -406,6 +406,7 @@
     finishSeek("player-changed");
     if (video) for (const name of videoEvents) video.removeEventListener(name, onVideoEvent);
     video = next;
+    displayedMetrics = null;
     ignoreBuffering();
     startupPlayback = null;
     resetStream();
@@ -419,12 +420,11 @@
     autoBlockedUntil = 0;
     if (video) {
       for (const name of videoEvents) video.addEventListener(name, onVideoEvent);
-      record("player-attached");
     }
   }
 
   function readLatency() {
-    if (!isLive() || !video) return;
+    if (!isLive() || !video || video.paused) return;
     requestId += 1;
     window.postMessage({ namespace: "chzzk-catchup-latency-request", token,
       requestId }, location.origin);
@@ -491,7 +491,8 @@
     startupPlayback = null;
     stopAuto("stream-switch");
     resetLatency();
-    record("stream-switch-request", { requestedKind: kind });
+    displayedMetrics = null;
+
     try {
       const response = await requestStream("switch", kind);
       if (epoch !== streamEpoch || mode !== playbackSettings.streamMode) return;
@@ -502,7 +503,6 @@
       }
       streamResult = { ok: response.ok, reason: response.reason,
         restored: response.restored, retryAfterSeconds: response.ok ? null : (streamBlockedUntil - monotonicNow()) / 1000 };
-      record("stream-switch-result", { result: streamResult });
     } finally { if (epoch === streamEpoch) { streamChanging = false; ignoreBuffering(); render(); } }
   }
 
@@ -548,7 +548,7 @@
     const data = event.data;
     if (event.source !== window || event.origin !== location.origin ||
         data?.namespace !== "chzzk-catchup-latency-response" ||
-        data.token !== token || data.requestId !== requestId || !isLive() || !video) return;
+        data.token !== token || data.requestId !== requestId || !isLive() || !video || video.paused) return;
     playerLatency = Number.isFinite(data.latency) && data.latency >= 0 &&
       data.latency <= 86400 ? data.latency : null;
     latencyAt = monotonicNow();
@@ -558,7 +558,6 @@
 
   function fail(message) {
     lastResult = { message, completed: false };
-    record("catch-up-blocked", { reason: message });
     render();
     return { ok: false, error: message, status: status() };
   }
@@ -579,12 +578,10 @@
     userRewound = false;
     userSeekFrom = null;
     autoBlockedUntil = Math.max(autoBlockedUntil, monotonicNow() + 15000);
-    const before = status();
-    const action = { ...plan, before, id: crypto.randomUUID(), timer: null };
+    const action = { ...plan, timer: null };
     pendingSeek = action;
     lastResult = { message: `${plan.skipSeconds.toFixed(2)}초 앞으로 이동을 요청했습니다.`,
       completed: false, target: plan.target, requestedSkipSeconds: plan.skipSeconds };
-    record("catch-up-request", { actionId: action.id, trigger, plan, before });
     action.timer = setTimeout(() => finishSeek("timeout"), 5000);
     try {
       // Stay in the already downloaded, continuous range containing the
@@ -600,6 +597,7 @@
   }
 
   function render() {
+    displayMetrics();
     label.update();
     rateIndicator.update();
   }
@@ -616,17 +614,6 @@
     if (message.type === "reset-buffer") {
       stopAuto("settings-changed");
       resetBufferGuard();
-      record("buffer-reset");
-      return Promise.resolve({ ok: true, status: status() });
-    }
-    if (message.type === "get-log") {
-      return Promise.resolve({ ok: true, log: { schemaVersion: 1,
-        extensionVersion: browser.runtime.getManifest().version,
-        exportedAt: new Date().toISOString(), path: location.pathname,
-        samples: samples.slice() } });
-    }
-    if (message.type === "clear-log") {
-      samples.length = 0;
       return Promise.resolve({ ok: true, status: status() });
     }
     return Promise.resolve({ ok: false, error: "지원하지 않는 요청입니다." });
@@ -652,7 +639,6 @@
       if (changes[key]) next[key] = changes[key].newValue;
     }
     autoSettings = autoPolicy.normalizeSettings(next, margin);
-    record("settings-changed");
     render();
   });
 
@@ -661,7 +647,6 @@
     refreshVideo();
     void inspectStream();
     readLatency();
-    if (isLive() && video) record("sample");
     render();
   }, 1000);
   const autoTimer = setInterval(() => {

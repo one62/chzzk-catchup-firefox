@@ -9,6 +9,7 @@
     <script src="../src/auto-policy.js" defer></script>
     <script src="../src/playback-policy.js" defer></script>
     <script src="popup.js" defer></script>
+    <script src="site-access.js" defer></script>
   </head>
   <body>
     <main>
@@ -20,110 +21,104 @@
         <span id="state-badge" class="state-badge">확인 중</span>
       </header>
 
-      <section class="metrics" aria-label="현재 재생 상태">
-        <div class="metric metric-primary">
-          <span class="metric-label" title="최근 5초 측정값의 평균">플레이어 지연 · 5초 평균</span>
-          <strong id="player-latency" class="metric-value">—</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label" title="현재 위치에서 마지막 탐색 가능 위치까지의 시간">끝점까지</span>
-          <strong id="edge-distance" class="metric-value">—</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">연속 버퍼</span>
-          <strong id="forward-buffer" class="metric-value">—</strong>
-        </div>
-      </section>
+      <section class="feature-group catchup-group" aria-labelledby="catchup-title">
+        <h2 id="catchup-title">따라잡기</h2>
+        <section class="metrics" aria-label="현재 재생 상태">
+          <div class="metric metric-primary">
+            <span class="metric-label" title="최근 5초 측정값의 평균">지연 · 5초 평균</span>
+            <strong id="player-latency" class="metric-value">—</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label" title="현재 위치에서 마지막 탐색 가능 위치까지의 시간">끝점까지</span>
+            <strong id="edge-distance" class="metric-value">—</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">버퍼</span>
+            <strong id="forward-buffer" class="metric-value">—</strong>
+          </div>
+        </section>
 
-      <p class="help">버퍼는 받아 둔 영상의 남은 시간이에요. 지연은 PC 시계 오차에 영향을 받아요.</p>
+        <section class="settings-group" aria-label="연결 방식">
+          <p class="section-label">현재 연결 <strong id="current-connection">—</strong></p>
+          <div class="stream-buttons" role="group" aria-label="사용할 연결 방식">
+            <button id="stream-auto" type="button" class="button button-secondary" aria-pressed="true">자동</button>
+            <button id="stream-hls" type="button" class="button button-secondary" aria-pressed="false">HLS</button>
+            <button id="stream-llhls" type="button" class="button button-secondary" aria-pressed="false">LL-HLS</button>
+          </div>
+          <p id="stream-status" class="help" role="status"></p>
+        </section>
 
-      <section class="settings-group" aria-label="연결 방식">
-        <p class="section-label">현재 연결 <strong id="current-connection">—</strong></p>
-        <div class="stream-buttons" role="group" aria-label="사용할 연결 방식">
-          <button id="stream-auto" type="button" class="button button-secondary" aria-pressed="true">자동</button>
-          <button id="stream-hls" type="button" class="button button-secondary" aria-pressed="false">HLS</button>
-          <button id="stream-llhls" type="button" class="button button-secondary" aria-pressed="false">LL-HLS</button>
-        </div>
-        <p class="help">누르면 저장·적용돼요. 자동은 LL-HLS 우선이며, 지원하지 않는 방식은 현재 연결을 유지해요.</p>
-        <p id="stream-status" class="help" role="status"></p>
-      </section>
-
-      <form id="auto-form" class="auto-form">
-        <label class="toggle-row" for="auto-enabled">
-          <span>자동 배속 따라잡기</span>
-          <input id="auto-enabled" name="autoEnabled" type="checkbox" checked>
-        </label>
-        <div class="auto-fields">
-          <div>
-            <label for="auto-start">시작 버퍼</label>
-            <div class="number-field">
-              <input id="auto-start" name="autoStart" type="number" min="2" max="30" step="0.1" value="3" inputmode="decimal" required aria-describedby="auto-help">
-              <span aria-hidden="true">초</span>
+        <form id="auto-form" class="auto-form">
+          <label class="toggle-row" for="auto-enabled">
+            <span>자동 배속 따라잡기</span>
+            <input id="auto-enabled" name="autoEnabled" type="checkbox" checked>
+          </label>
+          <div class="auto-fields">
+            <div>
+              <label for="auto-start">시작 버퍼</label>
+              <div class="number-field">
+                <input id="auto-start" name="autoStart" type="number" min="2" max="30" step="0.1" value="3" inputmode="decimal" required>
+                <span aria-hidden="true">초</span>
+              </div>
+            </div>
+            <div>
+              <label for="auto-rate">배속</label>
+              <select id="auto-rate" name="autoRate">
+                <option value="1.1">1.1배</option>
+                <option value="1.2">1.2배</option>
+                <option value="1.5" selected>1.5배</option>
+                <option value="2">2배</option>
+              </select>
             </div>
           </div>
-          <div>
-            <label for="auto-rate">따라잡기 배속</label>
-            <select id="auto-rate" name="autoRate" aria-describedby="auto-help">
-              <option value="1.1">1.1배</option>
-              <option value="1.2">1.2배</option>
-              <option value="1.5" selected>1.5배</option>
-              <option value="2">2배</option>
-            </select>
-          </div>
-        </div>
-        <p id="auto-help" class="help">HLS·LL-HLS에 동일하게 적용해요. 시작 버퍼는 2~30초, 남길 버퍼보다 0.5초 이상 크게 설정하세요. 종료 기준은 적용 중인 여유와 0.6초 중 큰 값이에요.</p>
-        <button id="save-auto" type="submit" class="button button-secondary" disabled>배속 설정 저장</button>
-      </form>
-
-      <form id="margin-form" class="margin-form">
-        <label class="toggle-row" for="startup-enabled">
-          <span>입장 시 한 번 따라잡기</span>
-          <input id="startup-enabled" name="startupEnabled" type="checkbox" checked aria-describedby="margin-help">
-        </label>
-        <label for="margin">남길 버퍼</label>
-        <div class="margin-controls">
-          <div class="number-field">
-            <input id="margin" name="margin" type="number" min="0.2" max="3" step="0.1" value="0.6" inputmode="decimal" required aria-describedby="margin-help">
-            <span aria-hidden="true">초</span>
-          </div>
-          <button id="save-margin" type="submit" class="button button-secondary" disabled>저장</button>
-        </div>
-        <p id="margin-help" class="help">0.2~3초 · 입장 시와 즉시 따라잡기에 적용해요. 작을수록 더 당기지만 끊기기 쉬워요. 변경 후 저장을 눌러 주세요.</p>
-      </form>
-
-      <details class="settings-group">
-        <summary>반복 끊김 대응</summary>
-        <form id="guard-form">
-          <label class="toggle-row" for="guard-enabled">
-            <span>남길 버퍼 자동 증가</span>
-            <input id="guard-enabled" type="checkbox" checked>
-          </label>
-          <div class="guard-fields">
-            <div><label for="guard-count">60초 내 끊김 횟수</label>
-              <input id="guard-count" type="number" min="2" max="5" step="1" value="2" required aria-describedby="guard-help"></div>
-            <div><label for="guard-step">증가량 (초)</label>
-              <input id="guard-step" type="number" min="0.1" max="1" step="0.1" value="0.2" required aria-describedby="guard-help"></div>
-            <div><label for="guard-max">상한 (초)</label>
-              <input id="guard-max" type="number" min="0.2" max="3" step="0.1" value="3" required aria-describedby="guard-help"></div>
-          </div>
-          <p id="guard-help" class="help">0.25초 이상 버퍼링이 반복되면 현재 방송에서만 여유를 늘려요. 배속 시작 기준도 함께 높여 버퍼를 덜 소모해요.</p>
-          <button id="save-guard" type="submit" class="button button-secondary" disabled>끊김 대응 설정 저장</button>
+          <button id="save-auto" type="submit" class="button button-secondary" disabled>배속 설정 저장</button>
         </form>
-      </details>
-      <p id="buffer-status" class="help"></p>
-      <button id="reset-buffer" type="button" class="text-button" disabled>자동 증가한 여유 초기화</button>
 
-      <button id="catch-up" type="button" class="button button-primary" disabled>즉시 따라잡기</button>
-      <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true">치지직 라이브 탭을 확인하고 있어요.</p>
+        <form id="margin-form" class="margin-form">
+          <label class="toggle-row" for="startup-enabled">
+            <span>입장 시 따라잡기</span>
+            <input id="startup-enabled" name="startupEnabled" type="checkbox" checked>
+          </label>
+          <label for="margin">남길 버퍼</label>
+          <div class="margin-controls">
+            <div class="number-field">
+              <input id="margin" name="margin" type="number" min="0.2" max="3" step="0.1" value="0.6" inputmode="decimal" required>
+              <span aria-hidden="true">초</span>
+            </div>
+            <button id="save-margin" type="submit" class="button button-secondary" disabled>저장</button>
+          </div>
+        </form>
 
-      <footer class="footer">
-        <span>진단 로그</span>
-        <div class="log-actions">
-          <button id="export-log" type="button" class="text-button" disabled>JSON 저장</button>
-          <span class="divider" aria-hidden="true"></span>
-          <button id="clear-log" type="button" class="text-button" disabled>지우기</button>
-        </div>
-      </footer>
+        <details class="settings-group">
+          <summary>반복 끊김 대응</summary>
+          <form id="guard-form">
+            <label class="toggle-row" for="guard-enabled">
+              <span>남길 버퍼 자동 증가</span>
+              <input id="guard-enabled" type="checkbox" checked>
+            </label>
+            <div class="guard-fields">
+              <div><label for="guard-count">60초 내 끊김 횟수</label>
+                <input id="guard-count" type="number" min="2" max="5" step="1" value="2" required></div>
+              <div><label for="guard-step">증가량 (초)</label>
+                <input id="guard-step" type="number" min="0.1" max="1" step="0.1" value="0.2" required></div>
+              <div><label for="guard-max">상한 (초)</label>
+                <input id="guard-max" type="number" min="0.2" max="3" step="0.1" value="3" required></div>
+            </div>
+            <button id="save-guard" type="submit" class="button button-secondary" disabled>끊김 대응 설정 저장</button>
+          </form>
+        </details>
+        <p id="buffer-status" class="help"></p>
+        <button id="reset-buffer" type="button" class="text-button" disabled>버퍼 증가분 초기화</button>
+
+        <button id="catch-up" type="button" class="button button-primary" disabled>즉시 따라잡기</button>
+        <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+      </section>
+
+      <section class="feature-group clip-group" aria-labelledby="clip-title">
+        <h2 id="clip-title">클립 편집기</h2>
+        <button id="grant-chzzk-access" type="button" class="button button-secondary">치지직 접근 허용</button>
+        <p id="site-access-status" class="help" role="status" aria-live="polite"></p>
+      </section>
     </main>
   </body>
 </html>

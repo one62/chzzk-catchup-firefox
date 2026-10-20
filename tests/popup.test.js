@@ -239,7 +239,7 @@ test("all settings can be saved outside CHZZK or before the content script conne
   for (const options of [{ url: "https://example.com/" }, { url: "about:newtab" }, { disconnected: true }]) {
     const app = await harness({}, options);
     assert.equal(app.elements.get("catch-up").disabled, true);
-    assert.equal(app.elements.get("export-log").disabled, true);
+    assert.equal(app.elements.has("export-log"), false);
     assert.equal(app.elements.get("margin").disabled, false);
     assert.equal(app.elements.get("auto-enabled").disabled, false);
     app.elements.get("margin").value = "0.2";
@@ -305,7 +305,7 @@ test("transport preference buttons work outside CHZZK and keep actual connection
   live.elements.get("stream-hls").emit("click");
   await flush();
   assert.equal(live.elements.get("current-connection").textContent, "LL-HLS");
-  assert.match(live.elements.get("stream-status").textContent, /제공되지 않아/);
+  assert.match(live.elements.get("stream-status").textContent, /미지원/);
 });
 
 test("failed connection preference writes retain the previous selected mode", async () => {

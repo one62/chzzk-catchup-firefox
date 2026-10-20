@@ -15,7 +15,14 @@ assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "128.0
 const assets = new Set([manifest.action.default_popup, manifest.action.default_icon,
   ...Object.values(manifest.icons)]);
 for (const script of manifest.content_scripts) {
-  assert.deepEqual(script.matches, ["https://chzzk.naver.com/*"]);
+  if (script.js?.includes("src/clip-compat.js")) {
+    assert.deepEqual(script.js, ["src/clip-compat.js"]);
+    assert.deepEqual(script.matches, ["https://chzzk.naver.com/clip-editor*"]);
+    assert.equal(script.run_at, "document_start");
+    assert.equal(script.world, "ISOLATED");
+  } else {
+    assert.deepEqual(script.matches, ["https://chzzk.naver.com/*"]);
+  }
   assert.notEqual(script.all_frames, true);
   for (const file of [...(script.js || []), ...(script.css || [])]) assets.add(file);
 }
@@ -31,6 +38,6 @@ for (const match of popup.matchAll(/(?:src|href)="([^"]+)"/g)) {
   assert.ok(fs.existsSync(asset), `Missing popup asset: ${match[1]}`);
 }
 const js = [...assets].filter((file) => file.endsWith(".js"));
-js.push("popup/popup.js");
+js.push("popup/popup.js", "popup/site-access.js");
 for (const file of js) execFileSync(process.execPath, ["--check", path.join(root, file)]);
 console.log(`Manifest, ${assets.size} manifest assets, popup assets and ${js.length} scripts checked.`);
