@@ -2,15 +2,11 @@
   "use strict";
   const MODES = ["auto", "hls", "llhls"];
   function normalize(raw = {}) {
-    const bounded = (value, min, max, fallback) => Number.isFinite(value) && value >= min && value <= max
-      ? Math.round(value * 10) / 10 : fallback;
+    raw = raw && typeof raw === "object" ? raw : {};
     return {
       streamMode: MODES.includes(raw.streamMode) ? raw.streamMode : "auto",
-      bufferGuardEnabled: typeof raw.bufferGuardEnabled === "boolean" ? raw.bufferGuardEnabled : true,
-      bufferGuardCount: Number.isInteger(raw.bufferGuardCount) && raw.bufferGuardCount >= 2 && raw.bufferGuardCount <= 5
-        ? raw.bufferGuardCount : 2,
-      bufferGuardStep: bounded(raw.bufferGuardStep, 0.1, 1, 0.2),
-      bufferGuardMax: bounded(raw.bufferGuardMax, 0.2, 3, 3),
+      bufferAutoEnabled: typeof raw.bufferAutoEnabled === "boolean" ? raw.bufferAutoEnabled
+        : typeof raw.bufferGuardEnabled === "boolean" ? raw.bufferGuardEnabled : true,
     };
   }
   function connectionLabel(kind) {

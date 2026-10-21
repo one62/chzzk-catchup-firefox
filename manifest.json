@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CHZZK Catch-up",
-  "version": "0.3.19",
+  "version": "0.3.21",
   "description": "치지직 라이브의 저지연 재생, 입장 시 따라잡기, 자동 배속과 지연·버퍼 표시를 제공합니다.",
   "browser_specific_settings": {
     "gecko": {
@@ -33,7 +33,7 @@
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
-      "js": ["src/media.js", "src/auto-policy.js", "src/playback-policy.js", "src/buffer-guard.js", "src/latency-average.js", "src/player-label.js", "src/rate-indicator.js", "src/content.js"],
+      "js": ["src/media.js", "src/auto-policy.js", "src/playback-policy.js", "src/buffer-optimizer.js", "src/latency-average.js", "src/player-label.js", "src/rate-indicator.js", "src/content.js"],
       "run_at": "document_idle"
     }
   ]

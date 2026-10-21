@@ -6,10 +6,12 @@
   const media = globalThis.ChzzkCatchupMedia;
   const autoPolicy = globalThis.ChzzkCatchupAutoPolicy;
   const playbackPolicy = globalThis.ChzzkCatchupPlaybackPolicy;
-  const bufferGuard = globalThis.ChzzkCatchupBufferGuard.create();
+  const bufferOptimizer = globalThis.ChzzkCatchupBufferOptimizer.create();
+  const BUFFER_AUTO_FALLBACK_TARGET = 3;
+  let playbackPreferences = {};
   let playbackSettings = playbackPolicy.normalize();
-  let guardIgnoreUntil = 0;
-  let lastBufferAdjustment = null;
+  let bufferIgnoreUntil = 0;
+  let bufferDimensions = null;
   const latencyAverage = globalThis.ChzzkCatchupLatencyAverage.create();
   const monotonicNow = () => performance.now();
   const token = crypto.randomUUID();
@@ -130,16 +132,18 @@
       adState: adState(),
       ...autoSettings, autoActive: Boolean(autoSession), autoReason, lastAutoStop,
       ...playbackSettings, effectiveMargin: effectiveMargin(),
-      effectiveAutoStart: effectiveAutoSettings().autoStart, lastBufferAdjustment,
+      effectiveAutoStart: effectiveAutoSettings().autoStart,
+      bufferOptimization: bufferOptimization(),
       connectionLabel: playbackPolicy.connectionLabel(stream?.selectedKind),
-      autoStopBuffer: autoPolicy.stopBuffer(effectiveMargin()), startupEnabled,
+      autoStopBuffer: autoStopMargin(), startupEnabled,
       startupPending: startupEnabled && startupPending,
       stream, streamChanging, streamResult };
   }
 
   const autoMessages = {
     disabled: "자동 배속 따라잡기가 꺼져 있습니다.",
-    "buffer-adjusted": "끊김이 반복되어 남길 버퍼를 늘렸습니다.",
+    "buffer-learning": "버퍼 보충 주기를 학습한 뒤 따라잡기를 시작합니다.",
+    "buffer-unstable": "버퍼 보충 간격이 불안정해 따라잡기를 기다립니다.",
     "below-threshold": "연속 버퍼에 여유가 생기면 자동으로 배속 재생합니다.",
     cooldown: "다음 자동 따라잡기까지 잠시 기다립니다.",
     rewind: "되감기한 위치를 유지합니다. 즉시 따라잡기를 누르면 자동 동작이 다시 허용됩니다.",
@@ -194,7 +198,7 @@
   function stepAuto() {
     if (pageSuspended) return;
     refreshVideo();
-    stepBufferGuard();
+    stepBufferOptimizer();
     void inspectStream();
     if (!stream || streamChanging || stream.busy) {
       stopAuto("stream-priority");
@@ -206,6 +210,11 @@
     if (stepStartup()) return;
     const state = status();
     const now = monotonicNow();
+    const optimization = bufferOptimization(autoSession?.rate ?? autoSettings.autoRate, true);
+    if (playbackSettings.bufferAutoEnabled && !optimization.playbackSafe && !autoSession) {
+      stopAuto(optimization.phase === "learning" ? "buffer-learning" : "buffer-unstable");
+      return;
+    }
     if (autoSession) {
       if (!sameRate(state.playbackRate, autoSession.rate)) {
         stopAuto("custom-rate");
@@ -218,6 +227,14 @@
       if (Number.isFinite(state.currentTime) && state.currentTime - autoSession.lastProgressPosition >= 0.3) {
         autoSession.lastProgressPosition = state.currentTime;
         autoSession.lastProgressAt = now;
+      }
+      // Refresh the target as the next replenishment approaches; a target
+      // captured only at session start becomes stale when a chunk arrives.
+      if (playbackSettings.bufferAutoEnabled) {
+        const requiredBuffer = optimization.playbackSafe
+          ? optimization.requiredBuffer : BUFFER_AUTO_FALLBACK_TARGET;
+        autoSession.margin = Math.min(3, requiredBuffer);
+        autoSession.requiredBuffer = requiredBuffer;
       }
       const decision = autoPolicy.activeDecision(state, autoSession, now);
       if (decision.stop) stopAuto(decision.reason);
@@ -233,8 +250,11 @@
         : autoMessages[decision.reason] || null;
       return;
     }
+    const requiredBuffer = playbackSettings.bufferAutoEnabled
+      ? optimization.requiredBuffer : effectiveMargin();
     autoSession = { video, originalRate: state.playbackRate, rate: autoSettings.autoRate,
-      margin: effectiveMargin(), startedAt: now, lastProgressAt: now, lastProgressPosition: state.currentTime };
+      margin: Math.min(3, requiredBuffer), requiredBuffer, startedAt: now,
+      lastProgressAt: now, lastProgressPosition: state.currentTime };
     resetLatency();
     try {
       video.playbackRate = autoSession.rate;
@@ -245,38 +265,61 @@
     }
   }
 
-  function effectiveMargin() { return bufferGuard.margin(margin, playbackSettings); }
-  function effectiveAutoSettings() { return autoPolicy.normalizeSettings(autoSettings, effectiveMargin()); }
-
-  function canCountBuffering() {
-    return settingsReady && playbackSettings.bufferGuardEnabled && isLive() && video &&
-      sourceHasPlayed && !pageSuspended && !video.paused && !video.ended &&
-      !video.seeking && !pendingSeek && !streamChanging && !userRewound &&
-      monotonicNow() >= guardIgnoreUntil && adState() !== "detected";
+  function bufferOptimization(rate = autoSession?.originalRate ?? video?.playbackRate ?? 1, controlled = false) {
+    return bufferOptimizer.status(monotonicNow(), margin, playbackSettings.bufferAutoEnabled, rate, controlled);
+  }
+  function effectiveMargin() { return bufferOptimization().margin; }
+  function autoStopMargin(rate = autoSession?.rate ?? autoSettings.autoRate) {
+    if (!playbackSettings.bufferAutoEnabled) return autoPolicy.stopBuffer(effectiveMargin());
+    const optimization = bufferOptimization(rate, true);
+    return optimization.playbackSafe ? optimization.requiredBuffer : BUFFER_AUTO_FALLBACK_TARGET;
+  }
+  function effectiveAutoSettings() {
+    const target = autoStopMargin();
+    const normalizedTarget = Math.min(3, Math.max(0.2, target));
+    return autoPolicy.normalizeSettings({ ...autoSettings,
+      autoStart: Math.max(autoSettings.autoStart, target + 0.5) }, normalizedTarget);
   }
 
-  function stepBufferGuard() {
-    if (!canCountBuffering()) { bufferGuard.cancel(); return; }
-    const adjustment = bufferGuard.tick(monotonicNow(), margin, playbackSettings);
-    if (!adjustment) return;
-    lastBufferAdjustment = adjustment;
-    stopAuto("buffer-adjusted");
-    autoBlockedUntil = Math.max(autoBlockedUntil, monotonicNow() + 15000);
+  function canCountBuffering() {
+    return settingsReady && playbackSettings.bufferAutoEnabled && isLive() && video &&
+      sourceHasPlayed && !pageSuspended && !document.hidden && !video.paused && !video.ended &&
+      !video.seeking && !pendingSeek && !streamChanging && !stream?.busy &&
+      monotonicNow() >= bufferIgnoreUntil && adState() !== "detected";
+  }
+
+  function stepBufferOptimizer() {
+    if (!canCountBuffering()) { bufferOptimizer.suspend(); return; }
+    const dimensions = video.videoWidth > 0 && video.videoHeight > 0
+      ? `${video.videoWidth}x${video.videoHeight}` : null;
+    if (dimensions && bufferDimensions && dimensions !== bufferDimensions) {
+      resetBufferOptimizer();
+      stopAuto("source-changed");
+      return;
+    }
+    if (dimensions) bufferDimensions = dimensions;
+    bufferOptimizer.observe({ ...media.snapshot(video), waiting: waitingForPlayback }, monotonicNow());
   }
 
   function ignoreBuffering() {
-    bufferGuard.cancel();
-    guardIgnoreUntil = monotonicNow() + 1000;
+    bufferOptimizer.suspend();
+    bufferIgnoreUntil = monotonicNow() + 1000;
   }
 
-  function resetBufferGuard() {
-    bufferGuard.reset();
-    lastBufferAdjustment = null;
+  function resetBufferOptimizer() {
+    bufferOptimizer.reset();
+    bufferDimensions = null;
     ignoreBuffering();
   }
 
   function stepStartup() {
     if (!startupEnabled || !startupPending) return false;
+    if (playbackSettings.bufferAutoEnabled && !bufferOptimization().safe) {
+      const phase = bufferOptimization().phase;
+      autoReason = autoMessages[phase === "learning" ? "buffer-learning" : "buffer-unstable"];
+      startupPlayback = null;
+      return true;
+    }
     // Let the chosen stream actually play before moving. Reset readiness on
     // interruptions/source changes, but never re-arm a completed entry seek.
     if (!video || video.paused || video.ended || video.seeking || pendingSeek ||
@@ -326,8 +369,8 @@
     if (event.currentTarget !== video) return;
     if (event.type === "pause") displayMetrics();
     if (["emptied", "loadedmetadata", "ended", "error"].includes(event.type)) displayedMetrics = null;
-    if (event.type === "waiting" && canCountBuffering()) bufferGuard.begin(monotonicNow());
-    if (event.type === "playing") { stepBufferGuard(); bufferGuard.cancel(); }
+    if (event.type === "waiting" && canCountBuffering()) bufferOptimizer.begin(monotonicNow());
+    if (event.type === "playing") { stepBufferOptimizer(); bufferOptimizer.cancel(); }
     if (["pause", "seeking", "seeked", "emptied", "loadedmetadata", "ended", "error"].includes(event.type)) ignoreBuffering();
     if (["waiting", "pause", "playing", "seeking", "seeked", "ratechange",
       "ended", "error"].includes(event.type)) resetLatency();
@@ -359,7 +402,7 @@
     if (event.type === "seeked" && !pendingSeek) {
       const current = media.snapshot(video);
       if (Number.isFinite(userSeekFrom) && current.currentTime < userSeekFrom - 0.5) userRewound = true;
-      if (Number.isFinite(current.edgeDistance) && current.edgeDistance <= margin + 0.5) userRewound = false;
+      if (Number.isFinite(current.edgeDistance) && current.edgeDistance <= effectiveMargin() + 0.5) userRewound = false;
       userSeekFrom = null;
     }
     if (event.type === "ratechange" && autoSession && !sameRate(video.playbackRate, autoSession.rate)) {
@@ -368,6 +411,7 @@
     }
     if (["emptied", "loadedmetadata", "ended", "error"].includes(event.type)) stopAuto("source-changed");
     if (event.type === "emptied" || event.type === "loadedmetadata") {
+      resetBufferOptimizer();
       startupPlayback = null;
       sourceHasPlayed = event.type === "loadedmetadata" && !video.paused && video.readyState >= 3;
       // A new source can reuse the same element while resetting its timeline.
@@ -390,7 +434,7 @@
       finishSeek("page-changed");
       path = nextPath;
       displayedMetrics = null;
-      resetBufferGuard();
+      resetBufferOptimizer();
       startupPending = true;
       startupPlayback = null;
       lastResult = null;
@@ -407,7 +451,7 @@
     if (video) for (const name of videoEvents) video.removeEventListener(name, onVideoEvent);
     video = next;
     displayedMetrics = null;
-    ignoreBuffering();
+    resetBufferOptimizer();
     startupPlayback = null;
     resetStream();
     lastAutoStop = null;
@@ -519,6 +563,12 @@
     }
     if (data.stream && typeof data.stream === "object") {
       const next = cleanStream(data.stream);
+      const selectedTrack = value => value?.tracks?.find(track => track.selected)?.id;
+      if (stream && (stream.sourceId !== next.sourceId || stream.selectedKind !== next.selectedKind ||
+          selectedTrack(stream) !== selectedTrack(next))) {
+        resetBufferOptimizer();
+        stopAuto("source-changed");
+      }
       if (stream?.sourceId !== next.sourceId && next.sourceId !== null) {
         streamBlockedUntil = 0; streamFailures = 0;
       }
@@ -568,6 +618,14 @@
     if (streamChanging) return fail("재생 전환이 끝난 뒤 다시 시도해 주세요.");
     if (pendingSeek) return fail("이전 위치 이동을 확인하는 중입니다.");
     if (adState() === "detected") return fail("광고 재생 중에는 따라잡지 않습니다.");
+    // A chunk may have arrived since the 250ms control tick. Observe its
+    // endpoint before seeking relative to that same, freshly buffered data.
+    stepBufferOptimizer();
+    if (playbackSettings.bufferAutoEnabled && !bufferOptimization().safe) {
+      return fail(bufferOptimization().phase === "learning"
+        ? "버퍼 보충 주기를 학습하는 중입니다. 학습이 끝난 뒤 다시 시도해 주세요."
+        : "버퍼 보충 간격이 불안정합니다. 안정된 뒤 다시 시도해 주세요.");
+    }
     const plan = media.planCatchUp(video, effectiveMargin());
     if (!plan.ok) return fail(plan.error);
     startupPending = false;
@@ -613,7 +671,7 @@
     }
     if (message.type === "reset-buffer") {
       stopAuto("settings-changed");
-      resetBufferGuard();
+      resetBufferOptimizer();
       return Promise.resolve({ ok: true, status: status() });
     }
     return Promise.resolve({ ok: false, error: "지원하지 않는 요청입니다." });
@@ -621,24 +679,21 @@
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !["margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
-      ...Object.keys(playbackSettings)].some((key) => changes[key])) return;
+      ...Object.keys(playbackSettings), "bufferGuardEnabled"].some((key) => changes[key])) return;
     stopAuto("settings-changed");
     if (changes.margin) margin = media.normalizeMargin(changes.margin.newValue);
     if (changes.startupEnabled) startupEnabled = changes.startupEnabled.newValue !== false;
-    const nextPlayback = { ...playbackSettings };
-    for (const key of Object.keys(playbackSettings)) {
+    const nextPlayback = { ...playbackPreferences };
+    for (const key of ["margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
+      ...Object.keys(playbackSettings), "bufferGuardEnabled"]) {
       if (changes[key]) nextPlayback[key] = changes[key].newValue;
     }
+    playbackPreferences = nextPlayback;
     playbackSettings = playbackPolicy.normalize(nextPlayback);
     if (changes.streamMode) { streamBlockedUntil = 0; streamFailures = 0; streamResult = null; }
-    if (changes.margin || ["bufferGuardEnabled", "bufferGuardCount", "bufferGuardStep", "bufferGuardMax"]
-      .some(key => changes[key])) resetBufferGuard();
+    if (changes.margin || changes.bufferAutoEnabled || changes.bufferGuardEnabled) resetBufferOptimizer();
     startupPlayback = null;
-    const next = { ...autoSettings };
-    for (const key of ["autoEnabled", "autoStart", "autoRate"]) {
-      if (changes[key]) next[key] = changes[key].newValue;
-    }
-    autoSettings = autoPolicy.normalizeSettings(next, margin);
+    autoSettings = autoPolicy.normalizeSettings(playbackPreferences, playbackSettings.bufferAutoEnabled ? 0.2 : margin);
     render();
   });
 
@@ -689,11 +744,12 @@
       .addEventListener(name, render, { passive: true });
   }
   browser.storage.local.get({ margin: 0.6, startupEnabled: true, autoEnabled: true, autoStart: 3, autoRate: 1.5,
-    ...playbackPolicy.normalize() }).then((saved) => {
+    streamMode: "auto", bufferAutoEnabled: null, bufferGuardEnabled: null }).then((saved) => {
     margin = media.normalizeMargin(saved.margin);
     startupEnabled = saved.startupEnabled !== false;
-    autoSettings = autoPolicy.normalizeSettings(saved, margin);
+    playbackPreferences = saved;
     playbackSettings = playbackPolicy.normalize(saved);
+    autoSettings = autoPolicy.normalizeSettings(saved, playbackSettings.bufferAutoEnabled ? 0.2 : margin);
     settingsReady = true;
     refreshVideo();
     readLatency();

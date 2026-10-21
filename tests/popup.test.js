@@ -33,12 +33,14 @@ async function harness(overrides = {}, options = {}) {
     isLive: true, videoFound: true, paused: false, seeking: false, adState: "unknown",
     playerLatency: 2, edgeDistance: 1.2, forwardBuffer: 1.2, margin: 0.6,
     autoEnabled: true, autoStart: 3, autoRate: 1.5, autoActive: false, autoReason: null,
+    bufferAutoEnabled: false,
     ...overrides,
   };
   const calls = [];
   const writes = [];
   const stored = { margin: status.margin, startupEnabled: status.startupEnabled ?? true,
-    autoEnabled: status.autoEnabled, autoStart: status.autoStart, autoRate: status.autoRate };
+    autoEnabled: status.autoEnabled, autoStart: status.autoStart, autoRate: status.autoRate,
+    bufferAutoEnabled: status.bufferAutoEnabled, ...options.stored };
   let storageListener;
   function changeStorage(values) {
     const changes = {};
@@ -288,6 +290,7 @@ test("unreadable settings cannot be overwritten with defaults", async () => {
   assert.equal(app.elements.get("auto-enabled").disabled, true);
   app.elements.get("margin-form").emit("submit");
   app.elements.get("auto-form").emit("submit");
+  app.elements.get("buffer-auto-form").emit("submit");
   await flush();
   assert.equal(app.writes.length, 0);
   assert.match(app.elements.get("feedback").textContent, /설정을 읽지 못/);
@@ -317,37 +320,209 @@ test("failed connection preference writes retain the previous selected mode", as
   assert.equal(app.writes.length, 0);
 });
 
-test("buffer guard preferences validate, preserve drafts and save without a live tab", async () => {
-  const app = await harness({}, { url: "about:newtab" });
-  app.elements.get("guard-count").value = "1";
-  app.elements.get("guard-count").emit("input");
-  app.elements.get("guard-form").emit("submit");
-  await flush();
-  assert.equal(app.writes.length, 0);
-  app.elements.get("guard-count").value = "3";
-  app.elements.get("guard-step").value = "0.4";
-  app.elements.get("guard-max").value = "2";
-  app.elements.get("guard-enabled").checked = false;
-  await app.refresh();
-  assert.equal(app.elements.get("guard-count").value, "3");
-  app.elements.get("guard-form").emit("submit");
-  await flush();
-  assert.equal(app.stored.bufferGuardEnabled, false);
-  assert.equal(app.stored.bufferGuardCount, 3);
-  assert.equal(app.stored.bufferGuardStep, 0.4);
-  assert.equal(app.stored.bufferGuardMax, 2);
-  assert.equal(app.writes[0].streamMode, undefined);
-  assert.equal(app.elements.get("save-guard").disabled, true);
+test("buffer optimization replaces guard controls directly below automatic catch-up", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../popup/popup.html"), "utf8");
+  const automaticEnd = html.indexOf("</form>", html.indexOf('id="auto-form"'));
+  const optimizerStart = html.indexOf('id="buffer-auto-form"');
+  assert.ok(automaticEnd < optimizerStart);
+  assert.ok(optimizerStart < html.indexOf('id="margin-form"'));
+  assert.match(html.slice(automaticEnd + 7, optimizerStart), /^\s*<form $/);
+  assert.doesNotMatch(html, /guard-(?:form|count|step|max|enabled)|반복 끊김 대응|버퍼 증가분/);
+  const optimization = html.slice(optimizerStart, html.indexOf("</form>", optimizerStart));
+  assert.match(optimization, /id="buffer-status"/);
+  assert.match(optimization, /버퍼 학습 초기화/);
 });
 
-test("effective buffer is shown separately from the saved base and reset is live-only", async () => {
-  const app = await harness({ margin: 0.6, effectiveMargin: 1.4, effectiveAutoStart: 3 });
+test("optimization toggle locks manual input immediately and saves independently outside CHZZK", async () => {
+  const app = await harness({ autoEnabled: false }, { url: "about:newtab" });
+  const toggle = app.elements.get("buffer-auto-enabled");
+  toggle.checked = true;
+  toggle.emit("input");
+  assert.equal(app.elements.get("margin").disabled, true);
+  assert.equal(app.elements.get("startup-enabled").disabled, false);
+  assert.equal(app.stored.bufferAutoEnabled, false);
+  assert.equal(app.writes.length, 0);
+  app.changeStorage({ autoRate: 1.2 });
+  await app.refresh();
+  assert.equal(toggle.checked, true);
+  assert.equal(app.elements.get("save-buffer-auto").disabled, false);
+  app.elements.get("buffer-auto-form").emit("submit");
+  await flush();
+  assert.deepEqual(Object.keys(app.writes[0]), ["bufferAutoEnabled"]);
+  assert.equal(app.stored.bufferAutoEnabled, true);
+  assert.equal(app.stored.autoEnabled, false);
+  assert.equal(app.elements.get("save-buffer-auto").disabled, true);
+});
+
+test("optimization disables manual input while preserving startup preference saves", async () => {
+  for (const options of [{}, { url: "about:newtab" }, { disconnected: true }]) {
+    const app = await harness({ bufferAutoEnabled: true, margin: 2.8, autoStart: 2 }, options);
+    assert.equal(app.elements.get("margin").disabled, true);
+    assert.equal(app.elements.get("startup-enabled").disabled, false);
+    app.elements.get("margin").value = "invalid";
+    app.elements.get("margin").emit("input");
+    app.elements.get("startup-enabled").checked = false;
+    app.elements.get("startup-enabled").emit("input");
+    assert.equal(app.elements.get("save-margin").disabled, false);
+    app.elements.get("margin-form").emit("submit");
+    await flush();
+    assert.deepEqual(Object.keys(app.writes[0]), ["startupEnabled"]);
+    assert.equal(app.stored.startupEnabled, false);
+    assert.equal(app.stored.margin, 2.8);
+    assert.equal(app.stored.autoStart, 2);
+    assert.equal(app.elements.get("margin").value, "2.8");
+  }
+});
+
+test("a draft optimization toggle also prevents programmatic writes to disabled manual input", async () => {
+  const app = await harness({ margin: 0.9 });
+  app.elements.get("buffer-auto-enabled").checked = true;
+  app.elements.get("buffer-auto-enabled").emit("input");
+  app.elements.get("margin").value = "0.2";
+  app.elements.get("margin").emit("input");
+  app.elements.get("startup-enabled").checked = false;
+  app.elements.get("startup-enabled").emit("input");
+  app.elements.get("margin-form").emit("submit");
+  await flush();
+  assert.deepEqual(Object.keys(app.writes[0]), ["startupEnabled"]);
+  assert.equal(app.stored.margin, 0.9);
+  assert.equal(app.stored.bufferAutoEnabled, false);
+});
+
+test("disabling optimization unlocks the preserved manual margin only after saving", async () => {
+  const app = await harness({ bufferAutoEnabled: true, margin: 0.9, effectiveMargin: 2.1 });
+  const toggle = app.elements.get("buffer-auto-enabled");
+  toggle.checked = false;
+  toggle.emit("input");
+  assert.equal(app.elements.get("margin").disabled, true);
+  assert.equal(app.stored.bufferAutoEnabled, true);
+  app.elements.get("buffer-auto-form").emit("submit");
+  await flush();
+  assert.equal(app.elements.get("margin").disabled, false);
+  assert.equal(app.elements.get("margin").value, "0.9");
+  assert.equal(app.stored.margin, 0.9);
+  assert.match(app.elements.get("buffer-status").textContent, /수동 남길 버퍼 0\.9초/);
+});
+
+test("failed optimization saves retain the saved mode and retryable draft", async () => {
+  for (const previous of [true, false]) {
+    const app = await harness({ bufferAutoEnabled: previous }, { url: "about:newtab" });
+    app.rejectAutoSave();
+    app.elements.get("buffer-auto-enabled").checked = !previous;
+    app.elements.get("buffer-auto-enabled").emit("input");
+    app.elements.get("buffer-auto-form").emit("submit");
+    await flush();
+    await app.refresh();
+    assert.equal(app.stored.bufferAutoEnabled, previous);
+    assert.equal(app.elements.get("buffer-auto-enabled").checked, !previous);
+    assert.equal(app.elements.get("margin").disabled, true);
+    assert.equal(app.elements.get("save-buffer-auto").disabled, false);
+    assert.match(app.elements.get("feedback").textContent, /저장하지 못/);
+  }
+});
+
+test("failed startup saves under optimization preserve manual values and retryable startup draft", async () => {
+  const app = await harness({ bufferAutoEnabled: true, margin: 2.8, autoStart: 2 }, { url: "about:newtab" });
+  app.rejectAutoSave();
+  app.elements.get("startup-enabled").checked = false;
+  app.elements.get("startup-enabled").emit("input");
+  app.elements.get("margin").value = "invalid";
+  app.elements.get("margin-form").emit("submit");
+  await flush();
+  assert.equal(app.stored.startupEnabled, true);
+  assert.equal(app.stored.margin, 2.8);
+  assert.equal(app.elements.get("startup-enabled").checked, false);
+  assert.equal(app.elements.get("save-margin").disabled, false);
+});
+
+test("optimized mode saves user automatic start threshold independently of manual margin", async () => {
+  const app = await harness({ bufferAutoEnabled: true, margin: 3, autoStart: 2 });
+  assert.equal(app.elements.get("auto-start").value, "2");
+  app.elements.get("auto-start").value = "2.2";
+  app.elements.get("auto-start").emit("input");
+  assert.equal(app.elements.get("save-auto").disabled, false);
+  app.elements.get("auto-form").emit("submit");
+  await flush();
+  assert.equal(app.stored.autoStart, 2.2);
+  for (const start of ["1.9", "30.1", "invalid"]) {
+    app.elements.get("auto-start").value = start;
+    app.elements.get("auto-start").emit("input");
+    assert.equal(app.elements.get("save-auto").disabled, true);
+  }
+});
+
+test("legacy disabled guard preferences keep optimization disabled until explicitly changed", async () => {
+  const app = await harness({}, { stored: { bufferAutoEnabled: undefined, bufferGuardEnabled: false } });
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, false);
+  assert.equal(app.elements.get("margin").disabled, false);
+  app.elements.get("buffer-auto-enabled").checked = true;
+  app.elements.get("buffer-auto-enabled").emit("input");
+  app.elements.get("buffer-auto-form").emit("submit");
+  await flush();
+  assert.equal(app.stored.bufferAutoEnabled, true);
+  assert.equal(app.stored.bufferGuardEnabled, false);
+});
+
+test("legacy flag changes are reevaluated while the new optimization preference is absent", async () => {
+  const app = await harness({}, { stored: { bufferAutoEnabled: undefined, bufferGuardEnabled: false } });
+  app.changeStorage({ bufferGuardEnabled: true });
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, true);
+  assert.equal(app.elements.get("margin").disabled, true);
+  app.changeStorage({ bufferGuardEnabled: false });
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, false);
+  assert.equal(app.elements.get("margin").disabled, false);
+});
+
+test("removing the new optimization preference restores the live legacy fallback", async () => {
+  const app = await harness({ bufferAutoEnabled: false }, { stored: { bufferGuardEnabled: true } });
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, false);
+  app.changeStorage({ bufferAutoEnabled: undefined });
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, true);
+  app.changeStorage({ bufferGuardEnabled: false });
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, false);
+  assert.equal(app.elements.get("margin").disabled, false);
+});
+
+test("saving other preferences preserves the disabled legacy fallback without creating a new flag", async () => {
+  const app = await harness({}, { url: "about:newtab",
+    stored: { bufferAutoEnabled: undefined, bufferGuardEnabled: false } });
+  app.elements.get("stream-hls").emit("click");
+  await flush();
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, false);
+  assert.equal(app.elements.get("margin").disabled, false);
+  assert.deepEqual(Object.keys(app.writes[0]), ["streamMode"]);
+  assert.equal(app.stored.bufferAutoEnabled, undefined);
+  app.changeStorage({ bufferGuardEnabled: true });
+  assert.equal(app.elements.get("buffer-auto-enabled").checked, true);
+});
+
+test("optimization learning state explains catch-up availability and reset is live-only", async () => {
+  const app = await harness({ bufferAutoEnabled: true, margin: 0.6, effectiveMargin: 1.4,
+    effectiveAutoStart: 3, bufferOptimization: { phase: "tracking", safe: true, sampleCount: 5,
+      periodSeconds: 2, jitterSeconds: 0.3 } });
   assert.equal(app.elements.get("margin").value, "0.6");
-  assert.match(app.elements.get("buffer-status").textContent, /1\.4초/);
+  assert.match(app.elements.get("buffer-status").textContent, /학습 완료.*1\.4초.*주기 2\.0초.*변동 0\.3초/);
   assert.equal(app.elements.get("reset-buffer").disabled, false);
+  assert.equal(app.elements.get("catch-up").disabled, false);
   app.elements.get("reset-buffer").emit("click");
   await flush();
   assert.equal(app.calls.some(call => call.type === "reset-buffer"), true);
-  const offline = await harness({}, { url: "about:newtab" });
+  assert.match(app.elements.get("feedback").textContent, /보충 주기 학습을 초기화/);
+  const offline = await harness({ bufferAutoEnabled: true }, { url: "about:newtab" });
   assert.equal(offline.elements.get("reset-buffer").disabled, true);
+  assert.match(offline.elements.get("buffer-status").textContent, /방송 재생 중/);
+  const manual = await harness({ bufferAutoEnabled: false, effectiveMargin: 1.4 });
+  assert.equal(manual.elements.get("reset-buffer").disabled, true);
+  for (const [phase, message] of [["learning", /버퍼 보충 주기 학습 중/],
+    ["unstable", /보충 간격이 불안정/], ["tracking", /필요한 버퍼 여유가 줄어들 때까지 따라잡기 대기/]]) {
+    const waiting = await harness({ bufferAutoEnabled: true,
+      bufferOptimization: { phase, safe: false, sampleCount: 0 } });
+    assert.equal(waiting.elements.get("catch-up").disabled, true);
+    waiting.elements.get("catch-up").emit("click");
+    await flush();
+    assert.equal(waiting.calls.some(call => call.type === "catch-up"), false);
+    assert.match(waiting.elements.get("buffer-status").textContent, message);
+    assert.match(waiting.elements.get("feedback").textContent, message);
+    assert.equal(waiting.elements.get("reset-buffer").disabled, false);
+  }
 });

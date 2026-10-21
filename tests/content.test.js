@@ -207,7 +207,7 @@ async function harness(overrides = {}, savedSettings = { autoEnabled: false }) {
   vm.runInContext(mediaSource, context, { filename: "src/media.js" });
   vm.runInContext(autoPolicySource, context, { filename: "src/auto-policy.js" });
   vm.runInContext(latencyAverageSource, context, { filename: "src/latency-average.js" });
-  for (const name of ["playback-policy", "buffer-guard"]) {
+  for (const name of ["playback-policy", "buffer-optimizer"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${name}.js`), "utf8"), context);
   }
   vm.runInContext(contentSource, context, { filename: "src/content.js" });
@@ -1188,43 +1188,137 @@ async function buffering(app, duration = 300) {
   app.video.emit("playing");
 }
 
-test("repeated buffering raises only this broadcast's effective margin and automatic start threshold", async () => {
-  const app = await harness({}, { bufferGuardEnabled: true, bufferGuardStep: 1,
-    bufferGuardMax: 3, autoEnabled: false, autoStart: 2 });
-  app.advance(1250);
-  await buffering(app);
-  assert.equal((await app.send("get-status")).status.effectiveMargin, 0.6);
-  await buffering(app);
-  let state = (await app.send("get-status")).status;
-  assert.equal(state.margin, 0.6);
-  assert.equal(state.effectiveMargin, 1.6);
-  assert.equal(state.effectiveAutoStart, 2.1);
-  assert.equal(app.storage.margin, 0.6);
-  await app.send("catch-up");
-  assert.deepEqual(app.video.seekWrites, [98.4]);
-  app.video.emit("seeked");
-  assert.equal((await app.send("get-status")).status.effectiveMargin, 1.6);
-  app.location.pathname = "/live/new-broadcast";
-  state = (await app.send("get-status")).status;
-  assert.equal(state.effectiveMargin, 0.6);
+async function replenish(app, seconds = 12, period = 1) {
+  let end = app.video.buffered.end(0);
+  const steps = Math.round(period * 4);
+  for (let i = 0; i < seconds * 4; i++) {
+    app.video.elapse(0.25 * app.video.playbackRate);
+    if ((i + 1) % steps === 0) {
+      end += period;
+      app.video.buffered = ranges([[0, end]]);
+    }
+    app.advance(250);
+    await flush();
+  }
+}
+
+test("automatic optimization learns replenishment without changing the stored manual buffer", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, margin: 2.5, autoEnabled: false, autoStart: 2 });
+  await replenish(app);
+  const state = (await app.send("get-status")).status;
+  assert.equal(state.bufferOptimization.phase, "tracking");
+  assert.ok(state.bufferOptimization.sampleCount >= 6);
+  assert.equal(state.margin, 2.5);
+  assert.equal(app.storage.margin, 2.5);
+  assert.ok(state.effectiveMargin < 2.5);
+  assert.ok(state.autoStopBuffer >= state.effectiveMargin);
+  assert.ok(state.effectiveAutoStart >= state.autoStopBuffer + 0.5 - 0.001);
+  const response = await app.send("catch-up");
+  assert.equal(response.ok, true);
+  assert.equal(app.video.seekWrites.length, 1);
+  assert.ok(app.video.buffered.end(0) - app.video.seekWrites[0] >= state.effectiveMargin - 0.001);
 });
 
-test("buffer protection ignores network stalled events, short interruptions and duplicate waiting", async () => {
-  const app = await harness({}, { bufferGuardEnabled: true, autoEnabled: false });
-  app.advance(1250);
-  app.video.emit("stalled"); app.advance(500); app.video.emit("stalled");
-  await buffering(app, 100); await buffering(app, 100);
-  app.video.emit("waiting"); app.advance(300);
-  app.video.emit("waiting"); app.advance(1000);
+test("optimization waits for learning and then uses a fresh rate-aware target", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true, autoRate: 2, autoStart: 2 });
+  app.advance(250);
+  assert.equal(app.video.playbackRate, 1);
+  assert.equal((await app.send("catch-up")).ok, false);
+  await replenish(app);
+  const state = (await app.send("get-status")).status;
+  assert.equal(state.bufferOptimization.phase, "tracking");
+  assert.equal(app.video.playbackRate, 2);
+  assert.ok(state.autoStopBuffer > state.effectiveMargin);
+  assert.ok(state.effectiveAutoStart >= state.autoStopBuffer + 0.5 - 0.001);
+  app.video.player.markers = [new Element()];
+  app.advance(250);
+  assert.equal(app.video.playbackRate, 1);
+  assert.equal((await app.send("get-status")).status.bufferOptimization.safe, false);
+});
+
+test("two-second replenishment keeps an owned 1.5x session running across new arrivals", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true, autoRate: 1.5 });
+  await replenish(app, 20, 2);
+  const state = (await app.send("get-status")).status;
+  assert.equal(state.bufferOptimization.phase, "tracking");
+  assert.equal(state.autoActive, true);
+  assert.equal(app.video.playbackRate, 1.5);
+  assert.deepEqual(app.video.rateWrites, [1.5]);
+  assert.equal(state.lastAutoStop, null);
+});
+
+test("custom-speed seeks retain enough buffer for the full next arrival interval", async () => {
+  const app = await harness({ playbackRate: 2, buffered: ranges([[0, 180]]) },
+    { bufferAutoEnabled: true, autoEnabled: false });
+  await replenish(app, 16, 2);
+  let state = (await app.send("get-status")).status;
+  assert.equal(state.bufferOptimization.phase, "tracking");
+  assert.equal(state.bufferOptimization.safe, false);
+  assert.equal((await app.send("catch-up")).ok, false);
+  for (let i = 0; i < 5; i++) { app.video.elapse(0.5); app.advance(250); await flush(); }
+  state = (await app.send("get-status")).status;
+  assert.equal(state.bufferOptimization.safe, true);
+  const expectedMargin = state.effectiveMargin;
+  assert.equal((await app.send("catch-up")).ok, true);
+  assert.ok(app.video.buffered.end(0) - app.video.seekWrites[0] >= expectedMargin - 0.001);
+  assert.equal(app.video.playbackRate, 2);
+  assert.equal(app.video.rateWrites.length, 0);
+});
+
+test("immediate catch-up observes a chunk arriving between control ticks before choosing its target", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: false });
+  await replenish(app, 16, 2);
+  for (let i = 0; i < 8; i++) { app.video.elapse(0.25); app.advance(250); await flush(); }
   assert.equal((await app.send("get-status")).status.effectiveMargin, 0.6);
-  app.video.emit("playing");
-  await buffering(app);
-  assert.equal((await app.send("get-status")).status.effectiveMargin, 0.8);
+  const newEdge = app.video.buffered.end(0) + 2;
+  app.video.buffered = ranges([[0, newEdge]]);
+  app.video.elapse(0.125);
+  app.advance(125);
+  const response = await app.send("catch-up");
+  assert.equal(response.ok, true);
+  assert.ok(newEdge - app.video.seekWrites[0] >= 2.3);
+});
+
+test("a user rewind keeps learning so explicit catch-up can return after relearning", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true });
+  await replenish(app);
+  app.video.seekable = ranges([[0, 250]]);
+  app.video.currentTime -= 2;
+  app.video.emit("seeking");
+  app.video.emit("seeked");
+  await replenish(app, 36);
+  const state = (await app.send("get-status")).status;
+  assert.equal(state.bufferOptimization.phase, "tracking");
+  assert.equal(state.autoActive, false);
+  assert.match(state.autoReason, /되감기/);
+  assert.equal((await app.send("catch-up")).ok, true);
+});
+
+test("toggling optimization restores the stored automatic start instead of a normalized manual value", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, margin: 3, autoStart: 2 });
+  assert.equal((await app.send("get-status")).status.autoStart, 2);
+  app.changeStorage({ bufferAutoEnabled: false });
+  assert.equal((await app.send("get-status")).status.autoStart, 3.5);
+  app.changeStorage({ bufferAutoEnabled: true });
+  assert.equal((await app.send("get-status")).status.autoStart, 2);
+  assert.equal(app.storage.autoStart, 2);
+});
+
+test("network stalled and short waiting events do not count as playback interruptions", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: false });
+  await replenish(app);
+  const before = (await app.send("get-status")).status.effectiveMargin;
+  app.video.emit("stalled");
+  assert.equal((await app.send("get-status")).status.effectiveMargin, before);
+  await buffering(app, 100);
+  const after = (await app.send("get-status")).status.effectiveMargin;
+  // The predicted arrival is 100ms closer; this is not a reserve increase.
+  assert.ok(after <= before && after >= before - 0.2);
 });
 
 test("pause, seek, advertisements, switching and page suspension cannot increase the buffer", async () => {
   for (const reason of ["pause", "seek", "ad", "switch", "pagehide"]) {
-    const app = await harness({}, { bufferGuardEnabled: true, autoEnabled: false });
+    const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: false });
     app.advance(1250);
     if (reason === "pause") { app.video.paused = true; app.video.emit("pause"); }
     if (reason === "seek") { app.video.seeking = true; app.video.emit("seeking"); }
@@ -1239,19 +1333,51 @@ test("pause, seek, advertisements, switching and page suspension cannot increase
   }
 });
 
-test("buffer adjustment can be reset or disabled and uses the configured cap", async () => {
-  const app = await harness({}, { bufferGuardEnabled: true, bufferGuardMax: 0.9, autoEnabled: false });
-  app.advance(1250);
-  for (let i = 0; i < 8; i++) await buffering(app);
-  assert.equal((await app.send("get-status")).status.effectiveMargin, 0.9);
-  assert.equal((await app.send("reset-buffer")).status.effectiveMargin, 0.6);
-  app.advance(1250);
-  await buffering(app); await buffering(app);
-  assert.equal((await app.send("get-status")).status.effectiveMargin, 0.8);
-  app.changeStorage({ bufferGuardEnabled: false });
-  app.advance(1250);
-  await buffering(app); await buffering(app);
-  assert.equal((await app.send("get-status")).status.effectiveMargin, 0.6);
+test("buffer learning can be reset, disabled and discarded on broadcast or quality changes", async () => {
+  for (const action of ["reset", "channel", "source", "quality", "dimensions", "disable"]) {
+    const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: false, margin: 2.5 });
+    app.video.videoWidth = 1920;
+    app.video.videoHeight = 1080;
+    await replenish(app);
+    assert.equal((await app.send("get-status")).status.bufferOptimization.phase, "tracking", action);
+    if (action === "reset") await app.send("reset-buffer");
+    if (action === "channel") app.location.pathname = "/live/another";
+    if (action === "source") app.video.emit("emptied");
+    if (action === "quality") {
+      app.setStream({ tracks: [{ id: "720p", selected: true, kind: "main" }] });
+      app.advance(1000);
+      await flush();
+    }
+    if (action === "dimensions") { app.video.videoWidth = 1280; app.advance(250); }
+    if (action === "disable") app.changeStorage({ bufferAutoEnabled: false });
+    const state = (await app.send("get-status")).status;
+    assert.equal(state.bufferOptimization.sampleCount, 0, action);
+    assert.equal(state.bufferOptimization.phase, action === "disable" ? "manual" : "learning", action);
+    if (action === "disable") {
+      assert.equal(state.effectiveMargin, 2.5);
+      assert.equal((await app.send("catch-up")).ok, true);
+    }
+  }
+});
+
+test("automatic entry catch-up waits for a stable buffer pattern and still runs with speed disabled", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: false, startupEnabled: true });
+  await progress(app, 2);
+  assert.equal(app.video.seekWrites.length, 0);
+  await replenish(app, 14);
+  assert.equal(app.video.seekWrites.length, 1);
+  assert.equal(app.video.playbackRate, 1);
+  assert.equal(app.video.playCalls, 0);
+});
+
+test("legacy off preference and explicit automatic choice survive live storage updates", async () => {
+  const app = await harness({}, { bufferGuardEnabled: false, margin: 2.5, autoEnabled: false });
+  assert.equal((await app.send("get-status")).status.bufferAutoEnabled, false);
+  app.changeStorage({ bufferGuardEnabled: true });
+  assert.equal((await app.send("get-status")).status.bufferAutoEnabled, true);
+  app.changeStorage({ bufferAutoEnabled: false });
+  app.changeStorage({ bufferGuardEnabled: true });
+  assert.equal((await app.send("get-status")).status.bufferAutoEnabled, false);
 });
 
 test("pause freezes label and popup metrics, rejects delayed responses and resumes fresh measurements", async () => {

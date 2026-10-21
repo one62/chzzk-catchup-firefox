@@ -6,13 +6,14 @@ const media = globalThis.ChzzkCatchupMedia;
 const autoPolicy = globalThis.ChzzkCatchupAutoPolicy;
 const playbackPolicy = globalThis.ChzzkCatchupPlaybackPolicy;
 const settingKeys = ["margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
-  ...Object.keys(playbackPolicy.normalize())];
+  "bufferGuardEnabled", ...Object.keys(playbackPolicy.normalize())];
 const elements = {
   badge: document.getElementById("state-badge"),
   latency: document.getElementById("player-latency"),
   edge: document.getElementById("edge-distance"),
   buffer: document.getElementById("forward-buffer"),
   margin: document.getElementById("margin"),
+  marginHelp: document.getElementById("margin-help"),
   startupEnabled: document.getElementById("startup-enabled"),
   marginForm: document.getElementById("margin-form"),
   save: document.getElementById("save-margin"),
@@ -28,22 +29,20 @@ const elements = {
   streamAuto: document.getElementById("stream-auto"),
   streamHls: document.getElementById("stream-hls"),
   streamLlhls: document.getElementById("stream-llhls"),
-  guardForm: document.getElementById("guard-form"),
-  guardEnabled: document.getElementById("guard-enabled"),
-  guardCount: document.getElementById("guard-count"),
-  guardStep: document.getElementById("guard-step"),
-  guardMax: document.getElementById("guard-max"),
-  saveGuard: document.getElementById("save-guard"),
+  bufferAutoForm: document.getElementById("buffer-auto-form"),
+  bufferAutoEnabled: document.getElementById("buffer-auto-enabled"),
+  saveBufferAuto: document.getElementById("save-buffer-auto"),
   bufferStatus: document.getElementById("buffer-status"),
   resetBuffer: document.getElementById("reset-buffer"),
 };
 
 let currentStatus = null;
 let currentTabId = null;
+let rawSettings = {};
 let savedSettings = null;
 let marginEdited = false;
 let autoEdited = false;
-let guardEdited = false;
+let bufferAutoEdited = false;
 let busy = false;
 let refreshing = false;
 let requestGeneration = 0;
@@ -64,7 +63,8 @@ function validAutoSettings() {
   const start = elements.autoStart.valueAsNumber;
   const margin = savedSettings?.margin ?? 0.6;
   const rate = Number(elements.autoRate.value);
-  return Number.isFinite(start) && start >= 2 && start <= 30 && start >= margin + 0.5
+  return Number.isFinite(start) && start >= 2 && start <= 30 &&
+    (savedSettings?.bufferAutoEnabled || start >= margin + 0.5)
     && [1.1, 1.2, 1.5, 2].includes(rate);
 }
 
@@ -73,29 +73,31 @@ function marginFitsAutoStart() {
   return start >= elements.margin.valueAsNumber + 0.5;
 }
 
-function validGuardSettings() {
-  const count = elements.guardCount.valueAsNumber;
-  const step = elements.guardStep.valueAsNumber;
-  const max = elements.guardMax.valueAsNumber;
-  return Number.isInteger(count) && count >= 2 && count <= 5 &&
-    Number.isFinite(step) && step >= 0.1 && step <= 1 &&
-    Number.isFinite(max) && max >= 0.2 && max <= 3;
+function manualMarginLocked() {
+  return savedSettings?.bufferAutoEnabled || elements.bufferAutoEnabled.checked;
+}
+
+function optimizationWaiting(status) {
+  return status?.bufferAutoEnabled === true && status.bufferOptimization?.safe === false;
 }
 
 function updateControls() {
   const settingsDisabled = busy || !savedSettings;
-  elements.margin.disabled = settingsDisabled;
+  const marginLocked = manualMarginLocked();
+  elements.margin.disabled = settingsDisabled || marginLocked;
+  elements.marginHelp.textContent = marginLocked
+    ? "자동 최적화를 끄고 저장하면 남길 버퍼를 직접 설정할 수 있어요." : "";
   elements.startupEnabled.disabled = settingsDisabled;
-  elements.save.disabled = settingsDisabled || !marginEdited || !validMargin() || !marginFitsAutoStart();
+  elements.save.disabled = settingsDisabled || !marginEdited ||
+    (!marginLocked && (!validMargin() || !marginFitsAutoStart()));
   elements.autoEnabled.disabled = settingsDisabled;
   elements.autoStart.disabled = settingsDisabled;
   elements.autoRate.disabled = settingsDisabled;
   elements.saveAuto.disabled = settingsDisabled || !autoEdited || !validAutoSettings();
   for (const element of [elements.streamAuto, elements.streamHls, elements.streamLlhls,
-    elements.guardEnabled, elements.guardCount, elements.guardStep, elements.guardMax]) element.disabled = settingsDisabled;
-  elements.saveGuard.disabled = settingsDisabled || !guardEdited || !validGuardSettings();
-  elements.resetBuffer.disabled = busy || !currentStatus?.isLive ||
-    !(currentStatus.effectiveMargin > currentStatus.margin);
+    elements.bufferAutoEnabled]) element.disabled = settingsDisabled;
+  elements.saveBufferAuto.disabled = settingsDisabled || !bufferAutoEdited;
+  elements.resetBuffer.disabled = busy || !savedSettings?.bufferAutoEnabled || !currentStatus?.isLive;
   elements.catchUp.disabled =
     busy ||
     !currentStatus?.isLive ||
@@ -104,6 +106,7 @@ function updateControls() {
     currentStatus.ended ||
     currentStatus.seeking ||
     currentStatus.streamChanging ||
+    optimizationWaiting(currentStatus) ||
     currentStatus.adState === "detected";
 }
 
@@ -127,6 +130,11 @@ function statusMessage(status) {
     const stopBuffer = Number.isFinite(status.autoStopBuffer) ? status.autoStopBuffer
       : autoPolicy.stopBuffer(status.margin);
     return `${rate}배속으로 따라잡는 중 · 종료 기준 ${stopBuffer.toFixed(1)}초`;
+  }
+  if (optimizationWaiting(status)) {
+    if (status.bufferOptimization.phase === "tracking") return "필요한 버퍼 여유가 줄어들 때까지 따라잡기 대기";
+    return status.bufferOptimization.phase === "unstable"
+      ? "보충 간격이 불안정해 따라잡기 대기" : "버퍼 보충 주기 학습 중";
   }
   if (status.autoEnabled === false) return "자동 배속 꺼짐";
   return "";
@@ -232,9 +240,11 @@ async function performAction(action) {
 }
 
 function applySettings(raw) {
+  rawSettings = { ...raw };
   const margin = media.normalizeMargin(raw.margin);
+  const playback = playbackPolicy.normalize(raw);
   savedSettings = { margin, startupEnabled: raw.startupEnabled !== false,
-    ...autoPolicy.normalizeSettings(raw, margin), ...playbackPolicy.normalize(raw) };
+    ...autoPolicy.normalizeSettings(raw, playback.bufferAutoEnabled ? 0.2 : margin), ...playback };
   renderSettings();
 }
 
@@ -249,12 +259,7 @@ function renderSettings() {
     elements.autoStart.value = String(savedSettings.autoStart);
     elements.autoRate.value = String(savedSettings.autoRate);
   }
-  if (!guardEdited) {
-    elements.guardEnabled.checked = savedSettings.bufferGuardEnabled;
-    elements.guardCount.value = String(savedSettings.bufferGuardCount);
-    elements.guardStep.value = String(savedSettings.bufferGuardStep);
-    elements.guardMax.value = String(savedSettings.bufferGuardMax);
-  }
+  if (!bufferAutoEdited) elements.bufferAutoEnabled.checked = savedSettings.bufferAutoEnabled;
   for (const [button, mode] of [[elements.streamAuto, "auto"], [elements.streamHls, "hls"], [elements.streamLlhls, "llhls"]]) {
     button.setAttribute("aria-pressed", String(savedSettings.streamMode === mode));
   }
@@ -274,21 +279,42 @@ function renderPlaybackInfo() {
       ? "연결 전환 대기" : "미지원 · 현재 연결 유지";
   }
   elements.streamStatus.textContent = info;
-  const base = savedSettings?.margin ?? 0.6;
-  elements.bufferStatus.textContent = state?.isLive && Number.isFinite(state.effectiveMargin)
-    ? `현재 남길 버퍼 ${state.effectiveMargin.toFixed(1)}초 · 배속 시작 ${Number(state.effectiveAutoStart ?? state.autoStart).toFixed(1)}초`
-    : `기본 남길 버퍼 ${base.toFixed(1)}초`;
+  if (!savedSettings?.bufferAutoEnabled) {
+    elements.bufferStatus.textContent = `수동 남길 버퍼 ${(savedSettings?.margin ?? 0.6).toFixed(1)}초`;
+    return;
+  }
+  if (!state?.isLive) {
+    elements.bufferStatus.textContent = "방송 재생 중 버퍼 보충 주기를 학습합니다.";
+    return;
+  }
+  const optimization = state.bufferOptimization;
+  const phase = optimization?.phase;
+  const details = [];
+  if (phase === "tracking") details.push(state.autoActive && Number.isFinite(state.autoStopBuffer)
+    ? `보충 주기 학습 완료 · 종료 기준 ${state.autoStopBuffer.toFixed(1)}초`
+    : optimizationWaiting(state) ? "필요한 버퍼 여유가 줄어들 때까지 따라잡기 대기" : "보충 주기 학습 완료");
+  else if (phase === "unstable") details.push(state.autoActive && Number.isFinite(state.autoStopBuffer)
+    ? `보충 간격 재확인 중 · 종료 기준 ${state.autoStopBuffer.toFixed(1)}초`
+    : "보충 간격이 불안정해 따라잡기 대기");
+  else details.push("버퍼 보충 주기 학습 중");
+  if (Number.isFinite(state.effectiveMargin)) details.push(`현재 남길 버퍼 ${state.effectiveMargin.toFixed(1)}초`);
+  if (Number.isFinite(optimization?.periodSeconds)) details.push(`보충 주기 ${optimization.periodSeconds.toFixed(1)}초`);
+  if (Number.isFinite(optimization?.jitterSeconds)) details.push(`변동 ${optimization.jitterSeconds.toFixed(1)}초`);
+  if (Number.isFinite(state.effectiveAutoStart ?? state.autoStart)) {
+    details.push(`배속 시작 ${(state.effectiveAutoStart ?? state.autoStart).toFixed(1)}초`);
+  }
+  elements.bufferStatus.textContent = details.join(" · ");
 }
 
 async function saveSettings(values) {
   try { await api.storage.local.set(values); }
   catch { throw new Error("설정을 저장하지 못했어요. 다시 시도해 주세요."); }
-  applySettings({ ...savedSettings, ...values });
+  applySettings({ ...rawSettings, ...values });
 }
 
 api.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !settingKeys.some(key => changes[key])) return;
-  const next = { ...savedSettings };
+  const next = { ...rawSettings };
   for (const key of settingKeys) {
     if (changes[key]) next[key] = changes[key].newValue;
   }
@@ -299,7 +325,7 @@ for (const element of [elements.margin, elements.startupEnabled]) {
   element.addEventListener("input", () => {
     marginEdited = true;
     updateControls();
-    if (validMargin() && !marginFitsAutoStart()) {
+    if (!manualMarginLocked() && validMargin() && !marginFitsAutoStart()) {
       showFeedback("시작 버퍼를 먼저 높여 주세요. 남길 버퍼보다 0.5초 이상 커야 해요.", true, 6000);
     }
   });
@@ -316,14 +342,15 @@ elements.autoForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!savedSettings) return;
   if (!validAutoSettings()) {
-    showFeedback("시작 버퍼는 2~30초이며 저장된 남길 버퍼보다 0.5초 이상 커야 해요.", true, 6000);
+    showFeedback(savedSettings.bufferAutoEnabled ? "시작 버퍼는 2~30초, 배속은 목록에서 선택해 주세요."
+      : "시작 버퍼는 2~30초이며 저장된 남길 버퍼보다 0.5초 이상 커야 해요.", true, 6000);
     return;
   }
   const settings = autoPolicy.normalizeSettings({
     autoEnabled: elements.autoEnabled.checked,
     autoStart: elements.autoStart.valueAsNumber,
     autoRate: Number(elements.autoRate.value),
-  }, savedSettings.margin);
+  }, savedSettings.bufferAutoEnabled ? 0.2 : savedSettings.margin);
   void performAction(async () => {
     await saveSettings(settings);
     autoEdited = false;
@@ -335,21 +362,24 @@ elements.autoForm.addEventListener("submit", (event) => {
 elements.marginForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!savedSettings) return;
-  if (!validMargin()) {
+  const marginLocked = manualMarginLocked();
+  if (!marginLocked && !validMargin()) {
     showFeedback("남길 버퍼는 0.2~3초 사이로 입력해 주세요.", true, 6000);
     return;
   }
-  if (!marginFitsAutoStart()) {
+  if (!marginLocked && !marginFitsAutoStart()) {
     showFeedback("시작 버퍼를 먼저 높여 주세요. 남길 버퍼보다 0.5초 이상 커야 해요.", true, 6000);
     return;
   }
-  const margin = media.normalizeMargin(elements.margin.valueAsNumber);
   const startupEnabled = elements.startupEnabled.checked;
+  const values = { startupEnabled };
+  if (!marginLocked) values.margin = media.normalizeMargin(elements.margin.valueAsNumber);
   void performAction(async () => {
-    await saveSettings({ margin, startupEnabled });
+    await saveSettings(values);
     marginEdited = false;
     renderSettings();
-    showFeedback(`남길 버퍼 ${margin.toFixed(1)}초 · 입장 시 따라잡기 ${startupEnabled ? "켜짐" : "꺼짐"}으로 저장했어요.`, false, 4000);
+    const description = marginLocked ? "" : `남길 버퍼 ${values.margin.toFixed(1)}초 · `;
+    showFeedback(`${description}입장 시 따라잡기 ${startupEnabled ? "켜짐" : "꺼짐"}으로 저장했어요.`, false, 4000);
   });
 });
 
@@ -373,25 +403,20 @@ for (const [button, mode] of [[elements.streamAuto, "auto"], [elements.streamHls
   });
 }
 
-for (const element of [elements.guardEnabled, elements.guardCount, elements.guardStep, elements.guardMax]) {
-  element.addEventListener("input", () => { guardEdited = true; updateControls(); });
-}
-elements.guardForm.addEventListener("submit", event => {
+elements.bufferAutoEnabled.addEventListener("input", () => {
+  bufferAutoEdited = true;
+  updateControls();
+});
+elements.bufferAutoForm.addEventListener("submit", event => {
   event.preventDefault();
   if (!savedSettings) return;
-  if (!validGuardSettings()) {
-    showFeedback("끊김 횟수는 2~5회, 증가량은 0.1~1초, 상한은 0.2~3초로 입력하세요.", true, 6000);
-    return;
-  }
-  const normalized = playbackPolicy.normalize({ bufferGuardEnabled: elements.guardEnabled.checked,
-    bufferGuardCount: elements.guardCount.valueAsNumber, bufferGuardStep: elements.guardStep.valueAsNumber,
-    bufferGuardMax: elements.guardMax.valueAsNumber });
-  const { streamMode, ...settings } = normalized;
+  const bufferAutoEnabled = elements.bufferAutoEnabled.checked;
   void performAction(async () => {
-    await saveSettings(settings);
-    guardEdited = false;
+    await saveSettings({ bufferAutoEnabled });
+    bufferAutoEdited = false;
+    if (!bufferAutoEnabled) elements.margin.value = String(savedSettings.margin);
     renderSettings();
-    showFeedback("끊김 대응 설정을 저장했어요. 현재 방송의 자동 증가분은 초기화돼요.", false, 4000);
+    showFeedback(`남길 버퍼 자동 최적화를 ${bufferAutoEnabled ? "켰어요" : "껐어요"}.`, false, 4000);
   });
 });
 elements.resetBuffer.addEventListener("click", () => {
@@ -399,7 +424,7 @@ elements.resetBuffer.addEventListener("click", () => {
   void performAction(async () => {
     const response = await send("reset-buffer");
     if (response.status) renderStatus(response.status);
-    showFeedback("현재 방송의 남길 버퍼를 기본 설정으로 되돌렸어요.", false, 4000);
+    showFeedback("현재 방송의 버퍼 보충 주기 학습을 초기화했어요.", false, 4000);
   });
 });
 

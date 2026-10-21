@@ -78,13 +78,15 @@
   function activeDecision(state, session, now) {
     const unavailable = unavailableReason(state);
     if (unavailable) return { stop: true, reason: unavailable };
+    const requiredBuffer = session?.requiredBuffer ?? session?.margin;
     if (!session || !Number.isFinite(session.margin) || session.margin < 0.2 ||
-        session.margin > 3 || !Number.isFinite(session.startedAt) ||
+        session.margin > 3 || !Number.isFinite(requiredBuffer) ||
+        requiredBuffer < 0.2 || requiredBuffer > 30 || !Number.isFinite(session.startedAt) ||
         !Number.isFinite(session.lastProgressAt) || !Number.isFinite(now) ||
         now < session.startedAt || now < session.lastProgressAt) {
       return { stop: true, reason: "invalid-session" };
     }
-    if (state.forwardBuffer <= session.margin) {
+    if (state.forwardBuffer <= requiredBuffer) {
       return { stop: true, reason: "target-reached" };
     }
     if (state.forwardBuffer <= stopBuffer(session.margin)) {

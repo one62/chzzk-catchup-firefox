@@ -74,6 +74,17 @@
           <button id="save-auto" type="submit" class="button button-secondary" disabled>배속 설정 저장</button>
         </form>
 
+        <form id="buffer-auto-form" class="settings-group">
+          <label class="toggle-row" for="buffer-auto-enabled">
+            <span>남길 버퍼 자동 최적화</span>
+            <input id="buffer-auto-enabled" name="bufferAutoEnabled" type="checkbox" checked>
+          </label>
+          <p class="help">버퍼 보충 주기와 흔들림을 학습해 따라잡기에 필요한 여유를 조절합니다.</p>
+          <button id="save-buffer-auto" type="submit" class="button button-secondary" disabled>버퍼 최적화 설정 저장</button>
+          <p id="buffer-status" class="help" role="status"></p>
+          <button id="reset-buffer" type="button" class="text-button" disabled>버퍼 학습 초기화</button>
+        </form>
+
         <form id="margin-form" class="margin-form">
           <label class="toggle-row" for="startup-enabled">
             <span>입장 시 따라잡기</span>
@@ -82,33 +93,13 @@
           <label for="margin">남길 버퍼</label>
           <div class="margin-controls">
             <div class="number-field">
-              <input id="margin" name="margin" type="number" min="0.2" max="3" step="0.1" value="0.6" inputmode="decimal" required>
+              <input id="margin" name="margin" type="number" min="0.2" max="3" step="0.1" value="0.6" inputmode="decimal" aria-describedby="margin-help" required>
               <span aria-hidden="true">초</span>
             </div>
             <button id="save-margin" type="submit" class="button button-secondary" disabled>저장</button>
           </div>
+          <p id="margin-help" class="help"></p>
         </form>
-
-        <details class="settings-group">
-          <summary>반복 끊김 대응</summary>
-          <form id="guard-form">
-            <label class="toggle-row" for="guard-enabled">
-              <span>남길 버퍼 자동 증가</span>
-              <input id="guard-enabled" type="checkbox" checked>
-            </label>
-            <div class="guard-fields">
-              <div><label for="guard-count">60초 내 끊김 횟수</label>
-                <input id="guard-count" type="number" min="2" max="5" step="1" value="2" required></div>
-              <div><label for="guard-step">증가량 (초)</label>
-                <input id="guard-step" type="number" min="0.1" max="1" step="0.1" value="0.2" required></div>
-              <div><label for="guard-max">상한 (초)</label>
-                <input id="guard-max" type="number" min="0.2" max="3" step="0.1" value="3" required></div>
-            </div>
-            <button id="save-guard" type="submit" class="button button-secondary" disabled>끊김 대응 설정 저장</button>
-          </form>
-        </details>
-        <p id="buffer-status" class="help"></p>
-        <button id="reset-buffer" type="button" class="text-button" disabled>버퍼 증가분 초기화</button>
 
         <button id="catch-up" type="button" class="button button-primary" disabled>즉시 따라잡기</button>
         <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true"></p>
