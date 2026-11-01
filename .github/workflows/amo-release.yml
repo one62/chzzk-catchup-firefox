@@ -1,0 +1,80 @@
+name: Submit Firefox release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amo-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - name: Validate version and prepare reviewed metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node tools/amo-prepare.mjs "$RELEASE_TAG"
+      - run: npx --no-install web-ext lint --source-dir dist/amo/extension --no-config-discovery
+      - run: npx --no-install web-ext build --source-dir dist/amo/extension --artifacts-dir dist/amo/package --no-config-discovery
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amo-review-${{ github.ref_name }}
+          path: dist/amo/
+          if-no-files-found: error
+      - name: Show approval instructions
+        run: |
+          echo 'Download the amo-review artifact and inspect review.md and the package before approving the amo-production deployment.' >> "$GITHUB_STEP_SUMMARY"
+          cat dist/amo/review.md >> "$GITHUB_STEP_SUMMARY"
+
+  submit:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: amo-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: amo-review-${{ github.ref_name }}
+          path: dist/amo
+      - name: Verify existing add-on and reject duplicate or pending versions
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          VERSION=$(node -p "require('./dist/amo/extension/manifest.json').version")
+          node tools/amo-api.mjs preflight "$VERSION"
+      - name: Submit listed version to Mozilla
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: npx --no-install web-ext sign --channel listed --source-dir dist/amo/extension --amo-metadata dist/amo/metadata.json --artifacts-dir dist/amo/submitted --approval-timeout 0 --no-config-discovery
+      - name: Apply explicitly requested description changes
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: node tools/amo-api.mjs listing dist/amo/listing.json
+      - name: Record submission result
+        run: echo 'Submission completed. This is not confirmation of Mozilla review approval or store publication. Check AMO Developer Hub for status. Do not automatically retry a partially completed submission.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Record failure recovery instructions
+        if: failure()
+        run: echo 'Submission or metadata update failed. Inspect AMO Developer Hub before retrying; a version may already have been created. No automatic retry or version deletion was performed.' >> "$GITHUB_STEP_SUMMARY"
