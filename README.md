@@ -1,7 +1,5 @@
 # CHZZK Catch-up
 
-Firefox 스토어 자동 제출과 API 키 설정: [배포 안내](amo/README.md).
-
 치지직 라이브의 지연을 줄이고 Firefox에서 클립 편집기를 사용할 수 있게 하는 확장입니다.
 
 ## 주요 기능

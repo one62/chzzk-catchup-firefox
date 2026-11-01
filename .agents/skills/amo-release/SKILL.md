@@ -3,7 +3,7 @@ name: amo-release
 description: Prepare CHZZK Catch-up Firefox store releases, bilingual release notes and reviewer notes, and diagnose this repository's AMO submission workflow.
 ---
 
-Read `amo/README.md` for repository-specific commands, secrets, approval setup and recovery. The workflow is `.github/workflows/amo-release.yml`; metadata preparation is `tools/amo-prepare.mjs`.
+Read `amo/README.md` for repository-specific metadata files, commands and recovery. The workflow is `.github/workflows/amo-release.yml`; metadata preparation is `tools/amo-prepare.mjs`. Authentication values are managed in the GitHub environment and must not be written to repository files.
 
 Keep the existing add-on ID `chzzk-catchup-firefox@local`. Releases use vX.Y.Z tags, GitHub Actions and the manually approved amo-production environment. Do not cancel or replace a version awaiting Mozilla review. Do not confuse successful submission with approval/publication.
 
