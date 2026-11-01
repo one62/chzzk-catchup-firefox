@@ -24,6 +24,7 @@ export function prepare(root, tag) {
     approval_notes: [read(path.join(root, 'amo/reviewer-common.md')), read(path.join(release, 'reviewer.md'))].join('\n\n'),
   } };
   const listing = config.updateListing ? {
+    summary: { ko: read(path.join(root, 'amo/summary.ko.txt')), 'en-US': read(path.join(root, 'amo/summary.en.txt')) },
     description: { ko: read(path.join(root, 'amo/listing.ko.md')), 'en-US': read(path.join(root, 'amo/listing.en.md')) },
   } : null;
   const out = path.join(root, 'dist/amo');

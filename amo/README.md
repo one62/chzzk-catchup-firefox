@@ -1,5 +1,7 @@
 # Firefox 스토어 배포
 
+스토어 문구는 `summary.ko.txt`·`summary.en.txt`(검색용 짧은 설명)와 `listing.ko.md`·`listing.en.md`(상세 설명)에 저장합니다. `updateListing: true`이면 한·영 짧은 설명과 상세 설명을 함께 갱신하므로 네 파일을 모두 확인하세요. false이면 기존 스토어 문구가 유지됩니다.
+
 ## 최초 설정
 
 GitHub 저장소 Settings → Environments에서 `amo-production` 환경을 만들고 Required reviewers에 `one62`를 지정합니다. 혼자 승인할 수 있도록 Prevent self-review는 끕니다. 관리자 승인 생략도 끄고 Deployment branches and tags는 `v*` 태그로 제한합니다. 환경 이름만 선언해서는 승인이 강제되지 않으므로 이 설정을 확인한 뒤 키를 등록하세요.

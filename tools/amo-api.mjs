@@ -61,7 +61,7 @@ if (process.argv[1]?.endsWith('amo-api.mjs')) {
   } else if (command === 'listing') {
     const listing = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (listing) {
-      assert.deepEqual(Object.keys(listing), ['description']);
+      assert.deepEqual(Object.keys(listing).sort(), ['description', 'summary']);
       await request(addonPath, { method: 'PATCH', body: JSON.stringify(listing) });
       console.log('Store descriptions updated.');
     } else console.log('Store descriptions unchanged.');

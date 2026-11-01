@@ -26,10 +26,14 @@ test('release staging requires matching versions and confirmed text; listing is 
     assert.equal(meta.version.approval_notes, 'Common reviewer text\n\nRelease-specific text');
     assert.deepEqual(fs.readdirSync(path.join(out, 'extension')).sort(), ['icons', 'manifest.json', 'popup', 'src']);
     assert.equal(fs.existsSync(path.join(out, 'extension/package.json')), false);
-    for (const locale of ['ko', 'en']) fs.writeFileSync(path.join(root, `amo/listing.${locale}.md`), `Description ${locale}`);
+    for (const locale of ['ko', 'en']) {
+      fs.writeFileSync(path.join(root, `amo/listing.${locale}.md`), `Description ${locale}`);
+      fs.writeFileSync(path.join(root, `amo/summary.${locale}.txt`), `Summary ${locale}`);
+    }
     config({ reviewed: true, updateListing: true });
     prepare(root, 'v1.2.3');
     assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'listing.json'))).description.ko, 'Description ko');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'listing.json'))).summary['en-US'], 'Summary en');
     fs.writeFileSync(path.join(release, 'reviewer.md'), 'TODO');
     assert.throws(() => prepare(root, 'v1.2.3'), /Unfinished text/);
   } finally {
