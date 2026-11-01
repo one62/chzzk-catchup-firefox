@@ -9,11 +9,11 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "u
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 assert.equal(manifest.manifest_version, 3);
 assert.equal(manifest.version, pkg.version);
-assert.deepEqual(manifest.permissions, ["storage"]);
+assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
 assert.deepEqual(manifest.host_permissions, ["https://chzzk.naver.com/*"]);
 assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "128.0");
 const assets = new Set([manifest.action.default_popup, manifest.action.default_icon,
-  ...Object.values(manifest.icons)]);
+  "src/clip-compat.js", ...manifest.background.scripts, ...Object.values(manifest.icons)]);
 for (const script of manifest.content_scripts) {
   if (script.js?.includes("src/clip-compat.js")) {
     assert.deepEqual(script.js, ["src/clip-compat.js"]);
@@ -38,6 +38,6 @@ for (const match of popup.matchAll(/(?:src|href)="([^"]+)"/g)) {
   assert.ok(fs.existsSync(asset), `Missing popup asset: ${match[1]}`);
 }
 const js = [...assets].filter((file) => file.endsWith(".js"));
-js.push("popup/popup.js", "popup/site-access.js");
+js.push("popup/popup.js", "popup/site-access.js", "popup/sections.js");
 for (const file of js) execFileSync(process.execPath, ["--check", path.join(root, file)]);
 console.log(`Manifest, ${assets.size} manifest assets, popup assets and ${js.length} scripts checked.`);

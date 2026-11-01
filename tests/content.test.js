@@ -807,6 +807,16 @@ test("synced setting changes release owned speed and adopt the new margin-safe s
   assert.equal(app.video.playbackRate, 1);
 });
 
+test("latency requests identify the selected main video when previews are present", async () => {
+  const app = await harness();
+  const preview = makeVideo({ box: { width: 320, height: 180 } });
+  app.document.videos = [preview, app.video];
+  app.advance(1000);
+  const request = app.postedMessages.findLast(message => message.namespace === "chzzk-catchup-latency-request");
+  assert.equal(request.videoIndex, 1);
+  assert.equal(app.labelVideo(), app.video);
+});
+
 test("the native-control label receives only fresh player latency and never substitutes edge distance", async () => {
   const app = await harness();
   assert.equal(app.labelLatency(), null);
@@ -871,15 +881,19 @@ test("seek, waiting, source changes and channel changes discard the previous lat
   assert.equal(replacement.labelLatency(), null);
 });
 
-test("PC time correction resets the average without making old samples appear fresh", async () => {
+test("PC time corrections preserve the average and cannot make old samples appear fresh", async () => {
   const app = await harness();
   app.respondLatency(2);
   app.advance(1000);
   app.setWallOffset(2950);
   app.respondLatency(5);
-  assert.equal(app.labelLatency(), 5);
-  assert.equal((await app.send("get-status")).status.latencySampleCount, 1);
+  assert.equal(app.labelLatency(), 3.5);
+  assert.equal((await app.send("get-status")).status.latencySampleCount, 2);
   app.setWallOffset(-60000);
+  app.advance(1000);
+  app.respondLatency(2);
+  assert.equal(app.labelLatency(), 3);
+  assert.equal((await app.send("get-status")).status.latencySampleCount, 3);
   app.advance(2501);
   assert.equal(app.labelLatency(), null);
   assert.equal((await app.send("get-status")).status.playerLatencyRaw, null);
@@ -1426,4 +1440,15 @@ test("paused metrics are discarded on channel, player and source changes", async
     assert.equal(state.playerLatency, null, change);
     assert.equal(app.labelLatency(), null, change);
   }
+});
+test("master switch releases owned speed and blocks actions without changing auto settings", async () => {
+  const app = await harness({}, { autoEnabled: true });
+  app.advance(250);
+  assert.equal(app.video.playbackRate, 1.5);
+  app.changeStorage({ catchupEnabled: false });
+  app.advance(2000);
+  assert.equal(app.video.playbackRate, 1);
+  assert.equal((await app.send("catch-up")).ok, false);
+  app.changeStorage({ catchupEnabled: true });
+  assert.equal((await app.send("get-status")).status.autoEnabled, true);
 });

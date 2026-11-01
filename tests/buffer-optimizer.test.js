@@ -30,7 +30,8 @@ function stream(optimizer, options = {}) {
 
 test("automatic startup waits for six real arrival intervals and ignores the manual margin", () => {
   const optimizer = create(), source = stream(optimizer);
-  assert.deepEqual(optimizer.status(0), { margin: 0.6, phase: "learning", sampleCount: 0,
+  assert.deepEqual(optimizer.status(0), { margin: 0.6, requiredBuffer: null, playbackSafe: false,
+    phase: "learning", sampleCount: 0,
     periodSeconds: null, jitterSeconds: null, remainingSeconds: null, safe: false });
   source.advance(12000);
   assert.equal(source.status().sampleCount, 5);

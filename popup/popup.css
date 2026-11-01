@@ -119,3 +119,13 @@ h2 { margin: 0 0 14px; font-size: 14px; font-weight: 700; }
 .feedback:empty, .help:empty { display: none; }
 .text-button { padding: 4px 0; border: 0; background: transparent; color: #bfd1d8; font-size: 11px; }
 .text-button:hover:not(:disabled) { color: #91e1da; }
+
+.feature-header { display: flex; align-items: center; gap: 8px; margin-inline-start: -6px; }
+.feature-header h2 { margin: 0; }
+.feature-header button { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 2px 0; white-space: nowrap; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.feature-header input[type="checkbox"] { flex: none; width: 18px; height: 18px; margin: 0 0 0 auto; padding: 0; accent-color: #79d6d0; }
+.feature-header button span { flex: none; width: 8px; height: 8px; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); transform-origin: 33.333% 50%; transform: translateY(-1px); }
+.feature-header button[aria-expanded="true"] span { transform: translateY(-1px) rotate(90deg); }
+.feature-body { min-width: 0; margin: 12px 0 0; padding: 0; border: 0; }
+.feature-body:disabled { opacity: .55; }
+#feature-note:empty { display: none; }

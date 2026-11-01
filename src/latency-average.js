@@ -6,13 +6,9 @@
 
   function create() {
     let samples = [];
-    let lastWallTime = null;
-    let lastTime = null;
 
     function reset() {
       samples = [];
-      lastWallTime = null;
-      lastTime = null;
     }
 
     function prune(now) {
@@ -24,23 +20,17 @@
       samples = samples.filter((sample) => sample.time > now - WINDOW_MS);
     }
 
-    function add(value, now, wallTime) {
+    function add(value, now) {
       if (!Number.isFinite(value) || value < 0 || value > 86400 ||
-          !Number.isFinite(now) || !Number.isFinite(wallTime)) {
+          !Number.isFinite(now)) {
         reset();
         return;
       }
-      // Date.now() is part of CHZZK's measurement. A clock correction must not
-      // be averaged together with samples measured against the old clock.
-      if (lastTime !== null && (now < lastTime || now - lastTime > MAX_AGE_MS ||
-          Math.abs((wallTime - lastWallTime) - (now - lastTime)) > 500)) reset();
       prune(now);
       if (samples.at(-1)?.time === now) samples.pop();
       samples.push({ value, time: now });
       // Responses are normally one second apart; also bound unexpected bursts.
       if (samples.length > 64) samples.splice(0, samples.length - 64);
-      lastTime = now;
-      lastWallTime = wallTime;
     }
 
     function get(now) {

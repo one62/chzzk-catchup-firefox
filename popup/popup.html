@@ -9,6 +9,7 @@
     <script src="../src/auto-policy.js" defer></script>
     <script src="../src/playback-policy.js" defer></script>
     <script src="popup.js" defer></script>
+    <script src="sections.js" defer></script>
     <script src="site-access.js" defer></script>
   </head>
   <body>
@@ -22,10 +23,14 @@
       </header>
 
       <section class="feature-group catchup-group" aria-labelledby="catchup-title">
-        <h2 id="catchup-title">따라잡기</h2>
+        <div class="feature-header">
+          <h2 id="catchup-title"><button id="catchup-fold" type="button" aria-expanded="true" aria-controls="catchup-body"><span aria-hidden="true"></span> 따라잡기</button></h2>
+          <input id="catchup-enabled" type="checkbox" checked disabled aria-label="따라잡기 전체 활성화">
+        </div>
+        <fieldset id="catchup-body" class="feature-body">
         <section class="metrics" aria-label="현재 재생 상태">
           <div class="metric metric-primary">
-            <span class="metric-label" title="최근 5초 측정값의 평균">지연 · 5초 평균</span>
+            <span class="metric-label" title="서버 응답 시각과 영상 시간 정보로 계산한 추정 지연의 최근 5초 평균">지연 · 5초 평균</span>
             <strong id="player-latency" class="metric-value">—</strong>
           </div>
           <div class="metric">
@@ -103,13 +108,20 @@
 
         <button id="catch-up" type="button" class="button button-primary" disabled>즉시 따라잡기</button>
         <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+        </fieldset>
       </section>
 
       <section class="feature-group clip-group" aria-labelledby="clip-title">
-        <h2 id="clip-title">클립 편집기</h2>
+        <div class="feature-header">
+          <h2 id="clip-title"><button id="clip-fold" type="button" aria-expanded="true" aria-controls="clip-body"><span aria-hidden="true"></span> 클립 편집기</button></h2>
+          <input id="clip-enabled" type="checkbox" checked disabled aria-label="클립 편집기 전체 활성화">
+        </div>
+        <fieldset id="clip-body" class="feature-body">
         <button id="grant-chzzk-access" type="button" class="button button-secondary">치지직 접근 허용</button>
         <p id="site-access-status" class="help" role="status" aria-live="polite"></p>
+        </fieldset>
       </section>
+    <p id="feature-note" class="help" role="status"></p>
     </main>
   </body>
 </html>

@@ -5,7 +5,7 @@ const namespace = "chzzk-catchup";
 const media = globalThis.ChzzkCatchupMedia;
 const autoPolicy = globalThis.ChzzkCatchupAutoPolicy;
 const playbackPolicy = globalThis.ChzzkCatchupPlaybackPolicy;
-const settingKeys = ["margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
+const settingKeys = ["catchupEnabled", "margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
   "bufferGuardEnabled", ...Object.keys(playbackPolicy.normalize())];
 const elements = {
   badge: document.getElementById("state-badge"),
@@ -209,7 +209,7 @@ async function send(type, extra = {}) {
 }
 
 async function refreshStatus() {
-  if (busy || refreshing) return;
+  if (rawSettings.catchupEnabled === false || busy || refreshing) return;
   refreshing = true;
   const generation = requestGeneration;
   try {
@@ -246,6 +246,11 @@ function applySettings(raw) {
   savedSettings = { margin, startupEnabled: raw.startupEnabled !== false,
     ...autoPolicy.normalizeSettings(raw, playback.bufferAutoEnabled ? 0.2 : margin), ...playback };
   renderSettings();
+  if (raw.catchupEnabled === false) {
+    requestGeneration++;
+    renderUnavailable("");
+    elements.badge.textContent = "따라잡기 꺼짐";
+  }
 }
 
 function renderSettings() {

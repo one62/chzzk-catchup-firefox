@@ -133,13 +133,31 @@ test("reports export or protected-property failures without stopping page initia
   }
 });
 
-test("manifest installs the Firefox bridge early in the isolated world without extra permissions", () => {
-  const entries = manifest.content_scripts.filter(item => item.js.includes("src/clip-compat.js"));
-  assert.equal(entries.length, 1);
-  assert.deepEqual(entries[0].matches, ["https://chzzk.naver.com/clip-editor*"]);
-  assert.equal(entries[0].run_at, "document_start");
-  assert.equal(entries[0].world, "ISOLATED");
-  assert.notEqual(entries[0].all_frames, true);
-  assert.deepEqual(manifest.permissions, ["storage"]);
-  assert.deepEqual(manifest.host_permissions, ["https://chzzk.naver.com/*"]);
+test("clip switch registers an early script and keeps it removed across startup", async () => {
+  const listeners = {};
+  const listener = key => ({ addListener: callback => { listeners[key] = callback; } });
+  let scripts = [], saved = { clipEnabled: true };
+  const browser = {
+    runtime: { onInstalled: listener("install"), onStartup: listener("startup"), onMessage: listener("message") },
+    permissions: { onAdded: listener("grant") },
+    storage: { local: { get: async () => saved, set: async values => { saved = values; } } },
+    scripting: {
+      getRegisteredContentScripts: async () => scripts,
+      registerContentScripts: async entries => { scripts = entries; },
+      unregisterContentScripts: async () => { scripts = []; },
+    },
+  };
+  const file = manifest.background.scripts[0];
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", file), "utf8"), { browser, console });
+  await listeners.install();
+  assert.equal(scripts.length, 1);
+  assert.equal(scripts[0].matches[0], "https://chzzk.naver.com/clip-editor*");
+  assert.equal(scripts[0].js[0], "src/clip-compat.js");
+  assert.equal(scripts[0].runAt, "document_start");
+  assert.equal(manifest.content_scripts.some(item => item.js.includes("src/clip-compat.js")), false);
+  await listeners.message({ type: "configure-clip", enabled: false });
+  await listeners.startup();
+  assert.equal(scripts.length, 0);
+  await listeners.message({ type: "configure-clip", enabled: true });
+  assert.equal(scripts.length, 1);
 });

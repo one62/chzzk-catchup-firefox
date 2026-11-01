@@ -28,6 +28,8 @@
   let displayedMetrics = null;
   let autoSettings = autoPolicy.normalizeSettings({}, margin);
   let settingsReady = false;
+  let catchupEnabled = false;
+  let enabledChanged = false;
   let startupEnabled = true;
   let startupPending = true;
   let startupPlayback = null;
@@ -65,7 +67,7 @@
   document.getElementById("chzzk-catchup-overlay")?.remove();
 
   function isLive() {
-    return /^\/live\/[^/]+\/?$/.test(location.pathname);
+    return catchupEnabled && /^\/live\/[^/]+\/?$/.test(location.pathname);
   }
 
   function visible(element, box = element?.getBoundingClientRect()) {
@@ -196,7 +198,7 @@
   }
 
   function stepAuto() {
-    if (pageSuspended) return;
+    if (!catchupEnabled || pageSuspended) return;
     refreshVideo();
     stepBufferOptimizer();
     void inspectStream();
@@ -471,7 +473,7 @@
     if (!isLive() || !video || video.paused) return;
     requestId += 1;
     window.postMessage({ namespace: "chzzk-catchup-latency-request", token,
-      requestId }, location.origin);
+      requestId, videoIndex: [...document.querySelectorAll("video")].indexOf(video) }, location.origin);
   }
 
   function requestStream(action, kind) {
@@ -602,7 +604,7 @@
     playerLatency = Number.isFinite(data.latency) && data.latency >= 0 &&
       data.latency <= 86400 ? data.latency : null;
     latencyAt = monotonicNow();
-    latencyAverage.add(playerLatency, latencyAt, Date.now());
+    latencyAverage.add(playerLatency, latencyAt);
     render();
   });
 
@@ -662,6 +664,7 @@
 
   browser.runtime.onMessage.addListener((message) => {
     if (message?.namespace !== "chzzk-catchup") return undefined;
+    if (!catchupEnabled) return Promise.resolve({ ok: false, error: "따라잡기 꺼짐" });
     refreshVideo();
     if (message.type === "catch-up") return Promise.resolve(catchUp());
     if (message.type === "get-status") {
@@ -678,6 +681,17 @@
   });
 
   browser.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.catchupEnabled) {
+      enabledChanged = true;
+      catchupEnabled = changes.catchupEnabled.newValue !== false;
+      if (!catchupEnabled) {
+        stopAuto("settings-changed");
+        resetStream();
+        resetLatency();
+      }
+      refreshVideo();
+      render();
+    }
     if (area !== "local" || !["margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
       ...Object.keys(playbackSettings), "bufferGuardEnabled"].some((key) => changes[key])) return;
     stopAuto("settings-changed");
@@ -698,13 +712,14 @@
   });
 
   const timer = setInterval(() => {
-    if (pageSuspended) return;
+    if (!catchupEnabled || pageSuspended) return;
     refreshVideo();
     void inspectStream();
     readLatency();
     render();
   }, 1000);
   const autoTimer = setInterval(() => {
+    if (!catchupEnabled) return;
     stepAuto();
     if (video && !video.seeking) lastPlaybackPosition = video.currentTime;
     render();
@@ -743,8 +758,9 @@
     (name === "resize" || name === "scroll" ? window : document)
       .addEventListener(name, render, { passive: true });
   }
-  browser.storage.local.get({ margin: 0.6, startupEnabled: true, autoEnabled: true, autoStart: 3, autoRate: 1.5,
+  browser.storage.local.get({ catchupEnabled: true, margin: 0.6, startupEnabled: true, autoEnabled: true, autoStart: 3, autoRate: 1.5,
     streamMode: "auto", bufferAutoEnabled: null, bufferGuardEnabled: null }).then((saved) => {
+    if (!enabledChanged) catchupEnabled = saved.catchupEnabled !== false;
     margin = media.normalizeMargin(saved.margin);
     startupEnabled = saved.startupEnabled !== false;
     playbackPreferences = saved;
