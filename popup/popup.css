@@ -73,7 +73,6 @@ h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.7px; }
 select { width: 100%; padding: 10px 9px; border: 1px solid #3b4a50; border-radius: 7px; background: #151d20; color: #e8f0f2; font: inherit; }
 select:focus-visible { outline: 2px solid #9cebe5; outline-offset: 2px; }
 select:disabled { color: #809198; }
-.auto-form .button { width: 100%; margin-top: 12px; font-size: 11px; }
 .margin-form { margin: 16px 0; }
 .margin-form label { display: block; margin-bottom: 8px; color: #c6d3d8; font-size: 12px; }
 .margin-controls { display: flex; gap: 8px; }
@@ -101,7 +100,6 @@ button:disabled { cursor: default; opacity: 0.4; }
 .stream-buttons .button { flex: 1; padding: 8px 6px; font-size: 11px; }
 .stream-buttons [aria-pressed="true"] { border-color: #79d6d0; color: #92deda; }
 #buffer-auto-form .toggle-row { margin-bottom: 0; }
-#save-buffer-auto { width: 100%; margin-top: 12px; font-size: 11px; }
 #reset-buffer { display: block; margin-top: 6px; }
 
 @media (max-width: 300px) {

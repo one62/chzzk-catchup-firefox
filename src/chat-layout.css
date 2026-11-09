@@ -5,6 +5,13 @@ html[data-chzzk-catchup-chat-below]:not(:fullscreen, :has(:fullscreen))
   min-width: 0 !important;
 }
 
+/* CHZZK can show a separate broadcast mini-player over the mid-roll ad. */
+html[data-chzzk-catchup-chat-below]:not(:fullscreen, :has(:fullscreen)):has(#midAdVideoContainer)
+  #layout-body:has(#aside-chatting:not([class*="_is_folded_"]))
+  .miniplayer.hidden_ui:not(.scroll_pip, .mid_ad_mini, .pre_ad_mini):not(:has(#midAdVideoContainer, #preAdVideoContainer)) {
+  visibility: hidden;
+}
+
 html[data-chzzk-catchup-chat-below]:not(:fullscreen, :has(:fullscreen)) #layout-body {
   /* Let the playback section fit the space left beside the navigation sidebar. */
   & > section:has(:is(#aside-chatting:not([class*="_is_folded_"]), #vod-aside [role="log"])) {
@@ -60,6 +67,36 @@ html[data-chzzk-catchup-chat-below]:not(:fullscreen, :has(:fullscreen)) #layout-
 
       & button[aria-label="채팅 접기"] > svg {
         rotate: 90deg;
+      }
+
+      &:has([class*="_layer_ytii2_"]) > div:has(button[aria-label="채팅 접기"]) {
+        & button:is([aria-label="채팅 접기"], [aria-label="더보기 메뉴"]) {
+          visibility: hidden;
+        }
+      }
+
+      /* The donation layer is bottom-aligned. Keep its header inside the chat panel. */
+      & [class*="_layer_ytii2_"] {
+        display: flex;
+        flex-direction: column;
+        max-height: var(--chzzk-catchup-chat-height, clamp(240px, 40vh, 420px));
+
+        & [class*="_container_ytii2_"] {
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+
+        & [class*="_contents_ytii2_"] {
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior-y: contain;
+        }
+
+        & [class*="_tablist_ytii2_"],
+        & [class*="_footer_ytii2_"] {
+          flex-shrink: 0;
+        }
       }
     }
   }

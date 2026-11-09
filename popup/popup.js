@@ -15,13 +15,9 @@ const elements = {
   margin: document.getElementById("margin"),
   marginHelp: document.getElementById("margin-help"),
   startupEnabled: document.getElementById("startup-enabled"),
-  marginForm: document.getElementById("margin-form"),
-  save: document.getElementById("save-margin"),
-  autoForm: document.getElementById("auto-form"),
   autoEnabled: document.getElementById("auto-enabled"),
   autoStart: document.getElementById("auto-start"),
   autoRate: document.getElementById("auto-rate"),
-  saveAuto: document.getElementById("save-auto"),
   catchUp: document.getElementById("catch-up"),
   feedback: document.getElementById("feedback"),
   connection: document.getElementById("current-connection"),
@@ -29,9 +25,7 @@ const elements = {
   streamAuto: document.getElementById("stream-auto"),
   streamHls: document.getElementById("stream-hls"),
   streamLlhls: document.getElementById("stream-llhls"),
-  bufferAutoForm: document.getElementById("buffer-auto-form"),
   bufferAutoEnabled: document.getElementById("buffer-auto-enabled"),
-  saveBufferAuto: document.getElementById("save-buffer-auto"),
   bufferStatus: document.getElementById("buffer-status"),
   resetBuffer: document.getElementById("reset-buffer"),
 };
@@ -40,9 +34,7 @@ let currentStatus = null;
 let currentTabId = null;
 let rawSettings = {};
 let savedSettings = null;
-let marginEdited = false;
-let autoEdited = false;
-let bufferAutoEdited = false;
+let settingWrites = Promise.resolve();
 let busy = false;
 let refreshing = false;
 let requestGeneration = 0;
@@ -54,49 +46,22 @@ function seconds(value) {
     : "—";
 }
 
-function validMargin() {
-  const value = elements.margin.valueAsNumber;
-  return Number.isFinite(value) && value >= 0.2 && value <= 3;
-}
-
-function validAutoSettings() {
-  const start = elements.autoStart.valueAsNumber;
-  const margin = savedSettings?.margin ?? 0.6;
-  const rate = Number(elements.autoRate.value);
-  return Number.isFinite(start) && start >= 2 && start <= 30 &&
-    (savedSettings?.bufferAutoEnabled || start >= margin + 0.5)
-    && [1.1, 1.2, 1.5, 2].includes(rate);
-}
-
-function marginFitsAutoStart() {
-  const start = savedSettings?.autoStart ?? 3;
-  return start >= elements.margin.valueAsNumber + 0.5;
-}
-
-function manualMarginLocked() {
-  return savedSettings?.bufferAutoEnabled || elements.bufferAutoEnabled.checked;
-}
-
 function optimizationWaiting(status) {
   return status?.bufferAutoEnabled === true && status.bufferOptimization?.safe === false;
 }
 
 function updateControls() {
   const settingsDisabled = busy || !savedSettings;
-  const marginLocked = manualMarginLocked();
+  const marginLocked = savedSettings?.bufferAutoEnabled || elements.bufferAutoEnabled.checked;
   elements.margin.disabled = settingsDisabled || marginLocked;
   elements.marginHelp.textContent = marginLocked
-    ? "자동 최적화를 끄고 저장하면 남길 버퍼를 직접 설정할 수 있어요." : "";
+    ? "자동 최적화를 끄면 남길 버퍼를 직접 설정할 수 있어요." : "";
   elements.startupEnabled.disabled = settingsDisabled;
-  elements.save.disabled = settingsDisabled || !marginEdited ||
-    (!marginLocked && (!validMargin() || !marginFitsAutoStart()));
   elements.autoEnabled.disabled = settingsDisabled;
   elements.autoStart.disabled = settingsDisabled;
   elements.autoRate.disabled = settingsDisabled;
-  elements.saveAuto.disabled = settingsDisabled || !autoEdited || !validAutoSettings();
   for (const element of [elements.streamAuto, elements.streamHls, elements.streamLlhls,
     elements.bufferAutoEnabled]) element.disabled = settingsDisabled;
-  elements.saveBufferAuto.disabled = settingsDisabled || !bufferAutoEdited;
   elements.resetBuffer.disabled = busy || !savedSettings?.bufferAutoEnabled || !currentStatus?.isLive;
   elements.catchUp.disabled =
     busy ||
@@ -255,16 +220,13 @@ function applySettings(raw) {
 
 function renderSettings() {
   if (!savedSettings) return;
-  if (!marginEdited) {
-    elements.margin.value = String(savedSettings.margin);
-    elements.startupEnabled.checked = savedSettings.startupEnabled;
+  elements.startupEnabled.checked = savedSettings.startupEnabled;
+  elements.autoEnabled.checked = savedSettings.autoEnabled;
+  elements.autoRate.value = String(savedSettings.autoRate);
+  elements.bufferAutoEnabled.checked = savedSettings.bufferAutoEnabled;
+  for (const key of ["margin", "autoStart"]) {
+    if (document.activeElement !== elements[key]) elements[key].value = String(savedSettings[key]);
   }
-  if (!autoEdited) {
-    elements.autoEnabled.checked = savedSettings.autoEnabled;
-    elements.autoStart.value = String(savedSettings.autoStart);
-    elements.autoRate.value = String(savedSettings.autoRate);
-  }
-  if (!bufferAutoEdited) elements.bufferAutoEnabled.checked = savedSettings.bufferAutoEnabled;
   for (const [button, mode] of [[elements.streamAuto, "auto"], [elements.streamHls, "hls"], [elements.streamLlhls, "llhls"]]) {
     button.setAttribute("aria-pressed", String(savedSettings.streamMode === mode));
   }
@@ -326,66 +288,51 @@ api.storage.onChanged.addListener((changes, area) => {
   applySettings(next);
 });
 
-for (const element of [elements.margin, elements.startupEnabled]) {
-  element.addEventListener("input", () => {
-    marginEdited = true;
-    updateControls();
-    if (!manualMarginLocked() && validMargin() && !marginFitsAutoStart()) {
-      showFeedback("시작 버퍼를 먼저 높여 주세요. 남길 버퍼보다 0.5초 이상 커야 해요.", true, 6000);
-    }
-  });
-}
-
-for (const element of [elements.autoEnabled, elements.autoStart, elements.autoRate]) {
-  element.addEventListener("input", () => {
-    autoEdited = true;
-    updateControls();
-  });
-}
-
-elements.autoForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  if (!savedSettings) return;
-  if (!validAutoSettings()) {
-    showFeedback(savedSettings.bufferAutoEnabled ? "시작 버퍼는 2~30초, 배속은 목록에서 선택해 주세요."
-      : "시작 버퍼는 2~30초이며 저장된 남길 버퍼보다 0.5초 이상 커야 해요.", true, 6000);
-    return;
+function applyOption(key, read, validate = () => "") {
+  const element = elements[key];
+  if (key === "margin" || key === "autoStart") {
+    element.addEventListener("keydown", event => {
+      if (event.key === "Enter") element.blur();
+    });
   }
-  const settings = autoPolicy.normalizeSettings({
-    autoEnabled: elements.autoEnabled.checked,
-    autoStart: elements.autoStart.valueAsNumber,
-    autoRate: Number(elements.autoRate.value),
-  }, savedSettings.bufferAutoEnabled ? 0.2 : savedSettings.margin);
-  void performAction(async () => {
-    await saveSettings(settings);
-    autoEdited = false;
-    renderSettings();
-    showFeedback("자동 배속 설정을 저장했어요.", false, 4000);
+  element.addEventListener("change", () => {
+    if (!savedSettings || element.disabled) return;
+    const value = read(element);
+    const displayedValue = element.value;
+    const stepMismatch = element.validity?.stepMismatch;
+    settingWrites = settingWrites.then(async () => {
+      const error = stepMismatch ? "버퍼값은 0.1초 단위로 입력해 주세요." : validate(value);
+      if (error) throw new Error(error);
+      await saveSettings({ [key]: value });
+    }).catch(error => {
+      if (element.value === displayedValue && typeof value === "number") {
+        element.value = String(savedSettings[key]);
+      }
+      renderSettings();
+      showFeedback(error.message, true, 6000);
+    });
   });
+}
+
+applyOption("startupEnabled", element => element.checked);
+applyOption("autoEnabled", element => element.checked);
+applyOption("autoRate", element => Number(element.value), value =>
+  [1.1, 1.2, 1.5, 2].includes(value) ? "" : "배속은 목록에서 선택해 주세요.");
+applyOption("bufferAutoEnabled", element => element.checked);
+applyOption("autoStart", element => element.valueAsNumber, value => {
+  if (!Number.isFinite(value) || value < 2 || value > 30) return "시작 버퍼는 2~30초 사이로 입력해 주세요.";
+  if (!savedSettings.bufferAutoEnabled && value < savedSettings.margin + 0.5) {
+    return "시작 버퍼는 남길 버퍼보다 0.5초 이상 커야 해요.";
+  }
+  return "";
 });
-
-elements.marginForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  if (!savedSettings) return;
-  const marginLocked = manualMarginLocked();
-  if (!marginLocked && !validMargin()) {
-    showFeedback("남길 버퍼는 0.2~3초 사이로 입력해 주세요.", true, 6000);
-    return;
+applyOption("margin", element => element.valueAsNumber, value => {
+  if (savedSettings.bufferAutoEnabled) return "자동 최적화를 끄면 남길 버퍼를 직접 설정할 수 있어요.";
+  if (!Number.isFinite(value) || value < 0.2 || value > 3) return "남길 버퍼는 0.2~3초 사이로 입력해 주세요.";
+  if (savedSettings.autoStart < media.normalizeMargin(value) + 0.5) {
+    return "시작 버퍼를 먼저 높여 주세요. 남길 버퍼보다 0.5초 이상 커야 해요.";
   }
-  if (!marginLocked && !marginFitsAutoStart()) {
-    showFeedback("시작 버퍼를 먼저 높여 주세요. 남길 버퍼보다 0.5초 이상 커야 해요.", true, 6000);
-    return;
-  }
-  const startupEnabled = elements.startupEnabled.checked;
-  const values = { startupEnabled };
-  if (!marginLocked) values.margin = media.normalizeMargin(elements.margin.valueAsNumber);
-  void performAction(async () => {
-    await saveSettings(values);
-    marginEdited = false;
-    renderSettings();
-    const description = marginLocked ? "" : `남길 버퍼 ${values.margin.toFixed(1)}초 · `;
-    showFeedback(`${description}입장 시 따라잡기 ${startupEnabled ? "켜짐" : "꺼짐"}으로 저장했어요.`, false, 4000);
-  });
+  return "";
 });
 
 elements.catchUp.addEventListener("click", () => {
@@ -408,22 +355,6 @@ for (const [button, mode] of [[elements.streamAuto, "auto"], [elements.streamHls
   });
 }
 
-elements.bufferAutoEnabled.addEventListener("input", () => {
-  bufferAutoEdited = true;
-  updateControls();
-});
-elements.bufferAutoForm.addEventListener("submit", event => {
-  event.preventDefault();
-  if (!savedSettings) return;
-  const bufferAutoEnabled = elements.bufferAutoEnabled.checked;
-  void performAction(async () => {
-    await saveSettings({ bufferAutoEnabled });
-    bufferAutoEdited = false;
-    if (!bufferAutoEnabled) elements.margin.value = String(savedSettings.margin);
-    renderSettings();
-    showFeedback(`남길 버퍼 자동 최적화를 ${bufferAutoEnabled ? "켰어요" : "껐어요"}.`, false, 4000);
-  });
-});
 elements.resetBuffer.addEventListener("click", () => {
   if (elements.resetBuffer.disabled) return;
   void performAction(async () => {

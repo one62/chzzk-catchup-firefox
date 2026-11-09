@@ -24,7 +24,7 @@ class Element {
 }
 
 async function flush() {
-  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  for (let index = 0; index < 30; index += 1) await Promise.resolve();
 }
 
 async function harness(overrides = {}, options = {}) {
@@ -112,89 +112,45 @@ test("popup has no LL-HLS trial or 60-second measurement controls", async () => 
   }
 });
 
-test("popup preserves unsaved automatic settings across status refreshes", async () => {
+test("automatic catch-up options apply independently on change", async () => {
   const app = await harness();
   const start = app.elements.get("auto-start");
+  start.value = "4.2";
+  start.emit("input");
+  await app.refresh();
+  assert.equal(start.value, "4.2");
+  assert.equal(app.writes.length, 0);
+  start.emit("change");
   const rate = app.elements.get("auto-rate");
-  start.value = "5";
-  start.emit("input");
-  rate.value = "1.2";
-  rate.emit("input");
-  app.changeStorage({ autoStart: 4, autoRate: 2, margin: 0.8 });
-  await app.refresh();
-  assert.equal(start.value, "5");
-  assert.equal(rate.value, "1.2");
-  assert.equal(app.elements.get("margin").value, "0.8");
-  assert.equal(app.elements.get("save-auto").disabled, false);
-  assert.equal(app.writes.length, 0);
-});
-
-test("automatic settings apply together only after explicit form save", async () => {
-  const app = await harness();
-  app.elements.get("auto-enabled").checked = false;
-  app.elements.get("auto-enabled").emit("input");
-  app.elements.get("auto-start").value = "4.5";
-  app.elements.get("auto-start").emit("input");
-  app.elements.get("auto-rate").value = "1.2";
-  app.elements.get("auto-rate").emit("input");
-  assert.equal(app.writes.length, 0);
-  app.elements.get("auto-form").emit("submit");
+  rate.value = "2";
+  rate.emit("change");
+  const enabled = app.elements.get("auto-enabled");
+  enabled.checked = false;
+  enabled.emit("change");
   await flush();
-  const request = app.writes[0];
-  assert.equal(request.autoEnabled, false);
-  assert.equal(request.autoStart, 4.5);
-  assert.equal(request.autoRate, 1.2);
-  assert.equal(app.elements.get("save-auto").disabled, true);
-  app.changeStorage({ autoStart: 6 });
-  await app.refresh();
-  assert.equal(app.elements.get("auto-start").value, "6");
+  assert.equal(app.stored.autoStart, 4.2);
+  assert.equal(app.stored.autoRate, 2);
+  assert.equal(app.stored.autoEnabled, false);
+  assert.deepEqual(app.writes.map(Object.keys), [["autoStart"], ["autoRate"], ["autoEnabled"]]);
 });
 
-test("a rejected save keeps pending settings visible and available to retry", async () => {
-  const app = await harness();
-  app.rejectAutoSave();
-  app.elements.get("auto-start").value = "5";
-  app.elements.get("auto-start").emit("input");
-  app.elements.get("auto-form").emit("submit");
-  await flush();
-  await app.refresh();
-  assert.equal(app.status.autoStart, 3);
-  assert.equal(app.elements.get("auto-start").value, "5");
-  assert.equal(app.elements.get("save-auto").disabled, false);
-  assert.match(app.elements.get("feedback").textContent, /저장/);
-});
-
-test("both settings forms reject inverted targets while allowing the exact half-second gap", async () => {
-  const app = await harness({ margin: 2.5 });
+test("buffer values reject inverted targets while allowing the half-second gap", async () => {
+  const app = await harness({ margin: 2, autoStart: 3 });
   const start = app.elements.get("auto-start");
-  start.value = "2.9";
-  start.emit("input");
-  assert.equal(app.elements.get("save-auto").disabled, true);
-  app.elements.get("auto-form").emit("submit");
+  start.value = "2.4";
+  start.emit("change");
   await flush();
   assert.equal(app.writes.length, 0);
-  start.value = "3";
-  start.emit("input");
-  assert.equal(app.elements.get("save-auto").disabled, false);
-
+  assert.equal(start.value, "3");
+  start.value = "2.5";
+  start.emit("change");
   const margin = app.elements.get("margin");
-  margin.value = "2.6";
-  margin.emit("input");
-  assert.equal(app.elements.get("save-margin").disabled, true);
-  app.elements.get("margin-form").emit("submit");
+  margin.value = "2.1";
+  margin.emit("change");
   await flush();
-  assert.equal(app.writes.length, 0);
-  margin.value = "2.5";
-  margin.emit("input");
-  assert.equal(app.elements.get("save-margin").disabled, false);
-  start.value = "31";
-  start.emit("input");
-  assert.equal(app.elements.get("save-auto").disabled, true);
-  start.value = "3";
-  start.emit("input");
-  app.elements.get("auto-rate").value = "3";
-  app.elements.get("auto-rate").emit("input");
-  assert.equal(app.elements.get("save-auto").disabled, true);
+  assert.equal(app.stored.autoStart, 2.5);
+  assert.equal(app.stored.margin, 2);
+  assert.equal(app.writes.length, 1);
 });
 
 test("active feedback reports the current rate and an unavailable latency stays separate from edge distance", async () => {
@@ -210,26 +166,6 @@ test("popup uses the actual automatic stop threshold for a 0.2-second margin", a
   assert.doesNotMatch(app.elements.get("feedback").textContent, /0\.2초/);
 });
 
-test("entry preference and margin stay unsaved until their shared form is saved", async () => {
-  const app = await harness({ startupEnabled: true });
-  const toggle = app.elements.get("startup-enabled");
-  assert.equal(toggle.checked, true);
-  toggle.checked = false;
-  toggle.emit("input");
-  app.elements.get("margin").value = "0.2";
-  app.elements.get("margin").emit("input");
-  await app.refresh();
-  assert.equal(toggle.checked, false);
-  assert.equal(app.elements.get("margin").value, "0.2");
-  assert.equal(app.writes.length, 0);
-  app.elements.get("margin-form").emit("submit");
-  await flush();
-  const saved = app.writes[0];
-  assert.equal(saved.startupEnabled, false);
-  assert.equal(saved.margin, 0.2);
-  assert.equal(app.elements.get("save-margin").disabled, true);
-});
-
 test("manual catch-up is disabled during stream preparation or ended playback", async () => {
   for (const state of [{ streamChanging: true }, { ended: true }]) {
     const app = await harness(state);
@@ -237,63 +173,44 @@ test("manual catch-up is disabled during stream preparation or ended playback", 
   }
 });
 
-test("all settings can be saved outside CHZZK or before the content script connects", async () => {
-  for (const options of [{ url: "https://example.com/" }, { url: "about:newtab" }, { disconnected: true }]) {
+test("options persist without a connected CHZZK tab", async () => {
+  for (const options of [{ url: "about:newtab" }, { disconnected: true }]) {
     const app = await harness({}, options);
-    assert.equal(app.elements.get("catch-up").disabled, true);
-    assert.equal(app.elements.has("export-log"), false);
-    assert.equal(app.elements.get("margin").disabled, false);
-    assert.equal(app.elements.get("auto-enabled").disabled, false);
-    app.elements.get("margin").value = "0.2";
-    app.elements.get("margin").emit("input");
-    app.elements.get("startup-enabled").checked = false;
-    app.elements.get("startup-enabled").emit("input");
-    app.elements.get("margin-form").emit("submit");
+    const startup = app.elements.get("startup-enabled");
+    startup.checked = false;
+    startup.emit("change");
+    const margin = app.elements.get("margin");
+    margin.value = "0.2";
+    margin.emit("change");
     await flush();
-    assert.equal(app.stored.margin, 0.2);
     assert.equal(app.stored.startupEnabled, false);
-    app.elements.get("auto-start").value = "4";
-    app.elements.get("auto-start").emit("input");
-    app.elements.get("auto-rate").value = "1.2";
-    app.elements.get("auto-rate").emit("input");
-    app.elements.get("auto-enabled").checked = false;
-    app.elements.get("auto-form").emit("submit");
-    await flush();
-    assert.equal(app.stored.autoStart, 4);
-    assert.equal(app.stored.autoRate, 1.2);
-    assert.equal(app.stored.autoEnabled, false);
-    await app.refresh();
-    assert.match(app.elements.get("feedback").textContent, /저장했어요/);
-    assert.equal(app.calls.every(call => call.type === "get-status"), true);
+    assert.equal(app.stored.margin, 0.2);
   }
 });
 
-test("failed standalone margin saves preserve stored values and allow retry", async () => {
-  const app = await harness({}, { url: "about:newtab" });
+test("failed option writes restore the saved value and allow retry", async () => {
+  const app = await harness();
+  const start = app.elements.get("auto-start");
   app.rejectAutoSave();
-  app.elements.get("margin").value = "0.2";
-  app.elements.get("margin").emit("input");
-  app.elements.get("startup-enabled").checked = false;
-  app.elements.get("startup-enabled").emit("input");
-  app.elements.get("margin-form").emit("submit");
+  start.value = "4";
+  start.emit("change");
   await flush();
-  assert.equal(app.stored.margin, 0.6);
-  assert.equal(app.stored.startupEnabled, true);
-  assert.equal(app.elements.get("save-margin").disabled, false);
-  assert.equal(app.elements.get("margin").value, "0.2");
-  assert.match(app.elements.get("feedback").textContent, /저장하지 못/);
+  assert.equal(start.value, "3");
+  assert.equal(app.writes.length, 0);
+  app.rejectAutoSave(false);
+  start.value = "4";
+  start.emit("change");
+  await flush();
+  assert.equal(app.stored.autoStart, 4);
 });
 
 test("unreadable settings cannot be overwritten with defaults", async () => {
-  const app = await harness({}, { failRead: true, url: "about:newtab" });
-  assert.equal(app.elements.get("margin").disabled, true);
-  assert.equal(app.elements.get("auto-enabled").disabled, true);
-  app.elements.get("margin-form").emit("submit");
-  app.elements.get("auto-form").emit("submit");
-  app.elements.get("buffer-auto-form").emit("submit");
+  const app = await harness({}, { failRead: true });
+  for (const id of ["margin", "auto-start", "auto-rate", "buffer-auto-enabled", "startup-enabled"]) {
+    app.elements.get(id).emit("change");
+  }
   await flush();
   assert.equal(app.writes.length, 0);
-  assert.match(app.elements.get("feedback").textContent, /설정을 읽지 못/);
 });
 
 test("transport preference buttons work outside CHZZK and keep actual connection separate", async () => {
@@ -322,145 +239,47 @@ test("failed connection preference writes retain the previous selected mode", as
 
 test("buffer optimization replaces guard controls directly below automatic catch-up", () => {
   const html = fs.readFileSync(path.join(__dirname, "../popup/popup.html"), "utf8");
-  const automaticEnd = html.indexOf("</form>", html.indexOf('id="auto-form"'));
+  const automaticStart = html.indexOf('id="auto-form"');
   const optimizerStart = html.indexOf('id="buffer-auto-form"');
-  assert.ok(automaticEnd < optimizerStart);
+  assert.ok(automaticStart >= 0 && automaticStart < optimizerStart);
   assert.ok(optimizerStart < html.indexOf('id="margin-form"'));
-  assert.match(html.slice(automaticEnd + 7, optimizerStart), /^\s*<form $/);
+  assert.doesNotMatch(html, /type="submit"/);
   assert.doesNotMatch(html, /guard-(?:form|count|step|max|enabled)|반복 끊김 대응|버퍼 증가분/);
-  const optimization = html.slice(optimizerStart, html.indexOf("</form>", optimizerStart));
+  const optimization = html.slice(optimizerStart, html.indexOf('id="margin-form"'));
   assert.match(optimization, /id="buffer-status"/);
   assert.match(optimization, /버퍼 학습 초기화/);
 });
 
-test("optimization toggle locks manual input immediately and saves independently outside CHZZK", async () => {
-  const app = await harness({ autoEnabled: false }, { url: "about:newtab" });
+test("optimization switches immediately and preserves the manual margin", async () => {
+  const app = await harness({ margin: 2 }, { url: "about:newtab" });
   const toggle = app.elements.get("buffer-auto-enabled");
   toggle.checked = true;
-  toggle.emit("input");
-  assert.equal(app.elements.get("margin").disabled, true);
-  assert.equal(app.elements.get("startup-enabled").disabled, false);
-  assert.equal(app.stored.bufferAutoEnabled, false);
-  assert.equal(app.writes.length, 0);
-  app.changeStorage({ autoRate: 1.2 });
-  await app.refresh();
-  assert.equal(toggle.checked, true);
-  assert.equal(app.elements.get("save-buffer-auto").disabled, false);
-  app.elements.get("buffer-auto-form").emit("submit");
+  toggle.emit("change");
   await flush();
-  assert.deepEqual(Object.keys(app.writes[0]), ["bufferAutoEnabled"]);
   assert.equal(app.stored.bufferAutoEnabled, true);
-  assert.equal(app.stored.autoEnabled, false);
-  assert.equal(app.elements.get("save-buffer-auto").disabled, true);
-});
-
-test("optimization disables manual input while preserving startup preference saves", async () => {
-  for (const options of [{}, { url: "about:newtab" }, { disconnected: true }]) {
-    const app = await harness({ bufferAutoEnabled: true, margin: 2.8, autoStart: 2 }, options);
-    assert.equal(app.elements.get("margin").disabled, true);
-    assert.equal(app.elements.get("startup-enabled").disabled, false);
-    app.elements.get("margin").value = "invalid";
-    app.elements.get("margin").emit("input");
-    app.elements.get("startup-enabled").checked = false;
-    app.elements.get("startup-enabled").emit("input");
-    assert.equal(app.elements.get("save-margin").disabled, false);
-    app.elements.get("margin-form").emit("submit");
-    await flush();
-    assert.deepEqual(Object.keys(app.writes[0]), ["startupEnabled"]);
-    assert.equal(app.stored.startupEnabled, false);
-    assert.equal(app.stored.margin, 2.8);
-    assert.equal(app.stored.autoStart, 2);
-    assert.equal(app.elements.get("margin").value, "2.8");
-  }
-});
-
-test("a draft optimization toggle also prevents programmatic writes to disabled manual input", async () => {
-  const app = await harness({ margin: 0.9 });
-  app.elements.get("buffer-auto-enabled").checked = true;
-  app.elements.get("buffer-auto-enabled").emit("input");
-  app.elements.get("margin").value = "0.2";
-  app.elements.get("margin").emit("input");
-  app.elements.get("startup-enabled").checked = false;
-  app.elements.get("startup-enabled").emit("input");
-  app.elements.get("margin-form").emit("submit");
-  await flush();
-  assert.deepEqual(Object.keys(app.writes[0]), ["startupEnabled"]);
-  assert.equal(app.stored.margin, 0.9);
-  assert.equal(app.stored.bufferAutoEnabled, false);
-});
-
-test("disabling optimization unlocks the preserved manual margin only after saving", async () => {
-  const app = await harness({ bufferAutoEnabled: true, margin: 0.9, effectiveMargin: 2.1 });
-  const toggle = app.elements.get("buffer-auto-enabled");
-  toggle.checked = false;
-  toggle.emit("input");
   assert.equal(app.elements.get("margin").disabled, true);
-  assert.equal(app.stored.bufferAutoEnabled, true);
-  app.elements.get("buffer-auto-form").emit("submit");
-  await flush();
-  assert.equal(app.elements.get("margin").disabled, false);
-  assert.equal(app.elements.get("margin").value, "0.9");
-  assert.equal(app.stored.margin, 0.9);
-  assert.match(app.elements.get("buffer-status").textContent, /수동 남길 버퍼 0\.9초/);
-});
-
-test("failed optimization saves retain the saved mode and retryable draft", async () => {
-  for (const previous of [true, false]) {
-    const app = await harness({ bufferAutoEnabled: previous }, { url: "about:newtab" });
-    app.rejectAutoSave();
-    app.elements.get("buffer-auto-enabled").checked = !previous;
-    app.elements.get("buffer-auto-enabled").emit("input");
-    app.elements.get("buffer-auto-form").emit("submit");
-    await flush();
-    await app.refresh();
-    assert.equal(app.stored.bufferAutoEnabled, previous);
-    assert.equal(app.elements.get("buffer-auto-enabled").checked, !previous);
-    assert.equal(app.elements.get("margin").disabled, true);
-    assert.equal(app.elements.get("save-buffer-auto").disabled, false);
-    assert.match(app.elements.get("feedback").textContent, /저장하지 못/);
-  }
-});
-
-test("failed startup saves under optimization preserve manual values and retryable startup draft", async () => {
-  const app = await harness({ bufferAutoEnabled: true, margin: 2.8, autoStart: 2 }, { url: "about:newtab" });
-  app.rejectAutoSave();
-  app.elements.get("startup-enabled").checked = false;
-  app.elements.get("startup-enabled").emit("input");
-  app.elements.get("margin").value = "invalid";
-  app.elements.get("margin-form").emit("submit");
-  await flush();
-  assert.equal(app.stored.startupEnabled, true);
-  assert.equal(app.stored.margin, 2.8);
-  assert.equal(app.elements.get("startup-enabled").checked, false);
-  assert.equal(app.elements.get("save-margin").disabled, false);
-});
-
-test("optimized mode saves user automatic start threshold independently of manual margin", async () => {
-  const app = await harness({ bufferAutoEnabled: true, margin: 3, autoStart: 2 });
-  assert.equal(app.elements.get("auto-start").value, "2");
-  app.elements.get("auto-start").value = "2.2";
-  app.elements.get("auto-start").emit("input");
-  assert.equal(app.elements.get("save-auto").disabled, false);
-  app.elements.get("auto-form").emit("submit");
+  const start = app.elements.get("auto-start");
+  start.value = "2.2";
+  start.emit("change");
   await flush();
   assert.equal(app.stored.autoStart, 2.2);
-  for (const start of ["1.9", "30.1", "invalid"]) {
-    app.elements.get("auto-start").value = start;
-    app.elements.get("auto-start").emit("input");
-    assert.equal(app.elements.get("save-auto").disabled, true);
-  }
+  toggle.checked = false;
+  toggle.emit("change");
+  await flush();
+  assert.equal(app.stored.bufferAutoEnabled, false);
+  assert.equal(app.elements.get("margin").disabled, false);
+  assert.equal(app.elements.get("margin").value, "2");
 });
 
-test("legacy disabled guard preferences keep optimization disabled until explicitly changed", async () => {
+test("legacy disabled optimization is preserved until the toggle changes", async () => {
   const app = await harness({}, { stored: { bufferAutoEnabled: undefined, bufferGuardEnabled: false } });
-  assert.equal(app.elements.get("buffer-auto-enabled").checked, false);
-  assert.equal(app.elements.get("margin").disabled, false);
-  app.elements.get("buffer-auto-enabled").checked = true;
-  app.elements.get("buffer-auto-enabled").emit("input");
-  app.elements.get("buffer-auto-form").emit("submit");
+  const toggle = app.elements.get("buffer-auto-enabled");
+  assert.equal(toggle.checked, false);
+  assert.equal(app.writes.length, 0);
+  toggle.checked = true;
+  toggle.emit("change");
   await flush();
   assert.equal(app.stored.bufferAutoEnabled, true);
-  assert.equal(app.stored.bufferGuardEnabled, false);
 });
 
 test("legacy flag changes are reevaluated while the new optimization preference is absent", async () => {

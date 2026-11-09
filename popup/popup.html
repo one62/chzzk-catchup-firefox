@@ -53,7 +53,7 @@
           <p id="stream-status" class="help" role="status"></p>
         </section>
 
-        <form id="auto-form" class="auto-form">
+        <div id="auto-form" class="auto-form">
           <label class="toggle-row" for="auto-enabled">
             <span>자동 배속 따라잡기</span>
             <input id="auto-enabled" name="autoEnabled" type="checkbox" checked>
@@ -76,21 +76,19 @@
               </select>
             </div>
           </div>
-          <button id="save-auto" type="submit" class="button button-secondary" disabled>배속 설정 저장</button>
-        </form>
+        </div>
 
-        <form id="buffer-auto-form" class="settings-group">
+        <div id="buffer-auto-form" class="settings-group">
           <label class="toggle-row" for="buffer-auto-enabled">
             <span>남길 버퍼 자동 최적화</span>
             <input id="buffer-auto-enabled" name="bufferAutoEnabled" type="checkbox" checked>
           </label>
           <p class="help">버퍼 보충 주기와 흔들림을 학습해 따라잡기에 필요한 여유를 조절합니다.</p>
-          <button id="save-buffer-auto" type="submit" class="button button-secondary" disabled>버퍼 최적화 설정 저장</button>
           <p id="buffer-status" class="help" role="status"></p>
           <button id="reset-buffer" type="button" class="text-button" disabled>버퍼 학습 초기화</button>
-        </form>
+        </div>
 
-        <form id="margin-form" class="margin-form">
+        <div id="margin-form" class="margin-form">
           <label class="toggle-row" for="startup-enabled">
             <span>입장 시 따라잡기</span>
             <input id="startup-enabled" name="startupEnabled" type="checkbox" checked>
@@ -101,10 +99,9 @@
               <input id="margin" name="margin" type="number" min="0.2" max="3" step="0.1" value="0.6" inputmode="decimal" aria-describedby="margin-help" required>
               <span aria-hidden="true">초</span>
             </div>
-            <button id="save-margin" type="submit" class="button button-secondary" disabled>저장</button>
           </div>
           <p id="margin-help" class="help"></p>
-        </form>
+        </div>
 
         <button id="catch-up" type="button" class="button button-primary" disabled>즉시 따라잡기</button>
         <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -127,17 +124,16 @@
           <input id="chatLayout-enabled" type="checkbox" disabled aria-label="채팅창 하단 배치 활성화">
         </div>
         <fieldset id="chatLayout-body" class="feature-body" disabled>
-          <form id="chat-width-form">
+          <div>
             <label for="chat-width">하단 배치 기준 너비</label>
             <div class="margin-controls">
               <div class="number-field">
                 <input id="chat-width" type="number" min="1" step="1" value="1000" required aria-describedby="chat-width-help">
                 <span aria-hidden="true">px</span>
               </div>
-              <button type="submit" class="button button-secondary">저장</button>
             </div>
             <p id="chat-width-help" class="help">페이지 표시 영역이 이 너비 이하이면 라이브와 다시보기 채팅창을 영상 아래에 표시합니다.</p>
-          </form>
+          </div>
         </fieldset>
       </section>
     <p id="feature-note" class="help" role="status"></p>
