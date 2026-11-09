@@ -1,0 +1,96 @@
+/* Keep the original panels in React's DOM. Only change the layout while chat is open. */
+/* CHZZK sets a 950px minimum on the shell above #layout-body. */
+html[data-chzzk-catchup-chat-below]:not(:fullscreen, :has(:fullscreen))
+  #root div:has(> #layout-body :is(#aside-chatting:not([class*="_is_folded_"]), #vod-aside [role="log"])) {
+  min-width: 0 !important;
+}
+
+html[data-chzzk-catchup-chat-below]:not(:fullscreen, :has(:fullscreen)) #layout-body {
+  /* Let the playback section fit the space left beside the navigation sidebar. */
+  & > section:has(:is(#aside-chatting:not([class*="_is_folded_"]), #vod-aside [role="log"])) {
+    min-width: 0 !important;
+  }
+
+  /* Live: the player is nested in the scrolling main column, beside the chat. */
+  & div:has(> main > div > [class^="_player_"]):has(> #aside-chatting:not([class*="_is_folded_"])) {
+    display: grid !important;
+    flex: 1 1 0% !important;
+    box-sizing: border-box;
+    width: auto !important;
+    max-width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(6, max-content);
+    align-content: start;
+    min-width: 0;
+    overflow-y: auto;
+
+    /* Keep both live player ancestors measurable by the site's mini-player logic. */
+    & > main,
+    & > main > div:has(> [class^="_player_"]) {
+      display: grid !important;
+      grid-template-rows: subgrid;
+      grid-column: 1;
+    }
+
+    & > main {
+      grid-row: 1 / -1;
+      height: auto;
+      overflow: visible;
+    }
+
+    & > main > div:has(> [class^="_player_"]) {
+      grid-row: 1 / 4;
+
+      & > [class^="_player_"] {
+        grid-row: 1;
+        width: 100%;
+      }
+
+      & > :not([class^="_player_"]) {
+        grid-row: 3;
+      }
+    }
+
+    & > #aside-chatting {
+      grid-area: 2 / 1;
+
+      & > div:has(button[class*="_ranking_button_"]) {
+        display: none !important;
+      }
+
+      & button[aria-label="채팅 접기"] > svg {
+        rotate: 90deg;
+      }
+    }
+  }
+
+  /* VOD: player and replay chat already share a row. */
+  & div:has(> #vod-aside [role="log"]):has(> div #player_layout) {
+    flex-direction: column !important;
+    flex-shrink: 0;
+
+    & > div:has(#player_layout) {
+      flex: none !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+
+    & > #vod-aside > div {
+      inset: 0;
+      width: 100% !important;
+    }
+  }
+
+  & div:has(> main > div > [class^="_player_"]):has(> #aside-chatting:not([class*="_is_folded_"])) > #aside-chatting,
+  & div:has(> div #player_layout) > #vod-aside:has([role="log"]) {
+    box-sizing: border-box;
+    flex: none !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: var(--chzzk-catchup-chat-height, clamp(240px, 40vh, 420px)) !important;
+    overflow: hidden;
+    margin: 0 !important;
+  }
+}

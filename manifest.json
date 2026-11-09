@@ -28,7 +28,8 @@
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
-      "js": ["src/media.js", "src/auto-policy.js", "src/playback-policy.js", "src/buffer-optimizer.js", "src/latency-average.js", "src/player-label.js", "src/rate-indicator.js", "src/content.js"],
+      "js": ["src/media.js", "src/auto-policy.js", "src/playback-policy.js", "src/buffer-optimizer.js", "src/latency-average.js", "src/player-label.js", "src/rate-indicator.js", "src/content.js", "src/chat-layout.js"],
+      "css": ["src/chat-layout.css"],
       "run_at": "document_idle"
     }
   ]

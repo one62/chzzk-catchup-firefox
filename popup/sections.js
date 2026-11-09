@@ -1,7 +1,7 @@
 (() => {
   const api = globalThis.browser || globalThis.chrome;
   const note = document.getElementById("feature-note");
-  for (const key of ["catchup", "clip"]) {
+  for (const key of ["catchup", "clip", "chatLayout"]) {
     const fold = document.getElementById(key + "-fold");
     const toggle = document.getElementById(key + "-enabled");
     const body = document.getElementById(key + "-body");
@@ -16,7 +16,12 @@
       body.disabled = !enabled;
     }
     fold.disabled = true;
-    api.storage.local.get({ [foldedKey]: false, [enabledKey]: true }).then(saved => {
+    const defaults = { [foldedKey]: false, [enabledKey]: key !== "chatLayout" };
+    if (key === "chatLayout") defaults.chatLayoutWidth = 1000;
+    api.storage.local.get(defaults).then(saved => {
+      if (key === "chatLayout") {
+        document.getElementById("chat-width").value = saved.chatLayoutWidth;
+      }
       showFold(saved[foldedKey]);
       showEnabled(saved[enabledKey]);
       fold.disabled = toggle.disabled = false;
@@ -48,4 +53,20 @@
       } finally { toggle.disabled = false; }
     });
   }
+  const width = document.getElementById("chat-width");
+  const form = document.getElementById("chat-width-form");
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!Number.isSafeInteger(width.valueAsNumber) || width.valueAsNumber < 1) return;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      await api.storage.local.set({ chatLayoutWidth: width.valueAsNumber });
+      note.textContent = "채팅창 배치 기준 너비를 저장했습니다.";
+    } catch {
+      note.textContent = "채팅창 배치 기준 너비를 저장하지 못했습니다.";
+    } finally {
+      button.disabled = false;
+    }
+  });
 })();

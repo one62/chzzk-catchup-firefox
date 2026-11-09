@@ -116,6 +116,7 @@ h2 { margin: 0 0 14px; font-size: 14px; font-weight: 700; }
 .clip-group h2 { color: #d4c2ea; }
 .clip-group .button { width: 100%; }
 .clip-group .button:disabled { opacity: 0.8; }
+.chat-group { margin-top: 18px; }
 .feedback:empty, .help:empty { display: none; }
 .text-button { padding: 4px 0; border: 0; background: transparent; color: #bfd1d8; font-size: 11px; }
 .text-button:hover:not(:disabled) { color: #91e1da; }

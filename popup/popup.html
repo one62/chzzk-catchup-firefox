@@ -121,6 +121,25 @@
         <p id="site-access-status" class="help" role="status" aria-live="polite"></p>
         </fieldset>
       </section>
+      <section class="feature-group chat-group" aria-labelledby="chatLayout-title">
+        <div class="feature-header">
+          <h2 id="chatLayout-title"><button id="chatLayout-fold" type="button" aria-expanded="true" aria-controls="chatLayout-body"><span aria-hidden="true"></span> 채팅창 하단 배치</button></h2>
+          <input id="chatLayout-enabled" type="checkbox" disabled aria-label="채팅창 하단 배치 활성화">
+        </div>
+        <fieldset id="chatLayout-body" class="feature-body" disabled>
+          <form id="chat-width-form">
+            <label for="chat-width">하단 배치 기준 너비</label>
+            <div class="margin-controls">
+              <div class="number-field">
+                <input id="chat-width" type="number" min="1" step="1" value="1000" required aria-describedby="chat-width-help">
+                <span aria-hidden="true">px</span>
+              </div>
+              <button type="submit" class="button button-secondary">저장</button>
+            </div>
+            <p id="chat-width-help" class="help">페이지 표시 영역이 이 너비 이하이면 라이브와 다시보기 채팅창을 영상 아래에 표시합니다.</p>
+          </form>
+        </fieldset>
+      </section>
     <p id="feature-note" class="help" role="status"></p>
     </main>
   </body>

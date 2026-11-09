@@ -25,13 +25,23 @@ test("fold and enable switches are independent and restored in a new popup", asy
   }
   let ui = await open();
   assert.equal(ui["catchup-body"].hidden, false);
+  assert.equal(ui["chatLayout-body"].disabled, true);
+  assert.equal(ui["chat-width"].value, 1000);
   await ui["catchup-fold"].click();
   assert.equal(ui["catchup-body"].disabled, false);
   ui["clip-enabled"].checked = false;
   await ui["clip-enabled"].change();
+  ui["chatLayout-enabled"].checked = true;
+  await ui["chatLayout-enabled"].change();
+  const saveWidth = {};
+  ui["chat-width-form"].querySelector = () => saveWidth;
+  ui["chat-width"].valueAsNumber = 960;
+  await ui["chat-width-form"].submit({ preventDefault() {} });
   ui = await open();
   assert.equal(ui["catchup-fold"]["aria-expanded"], "false");
   assert.equal(ui["catchup-enabled"].checked, true);
   assert.equal(ui["clip-body"].hidden, false);
   assert.equal(ui["clip-body"].disabled, true);
+  assert.equal(ui["chatLayout-body"].disabled, false);
+  assert.equal(ui["chat-width"].value, 960);
 });
