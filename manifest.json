@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "CHZZK Catch-up",
-  "version": "0.3.23",
-  "description": "치지직 라이브의 저지연 재생, 입장 시 따라잡기, 자동 배속과 지연·버퍼 표시를 제공합니다.",
+  "name": "치지직지직",
+  "version": "0.4.0",
+  "description": "치지직 자동 배속·따라잡기, 지연·버퍼 표시, 하단 채팅 배치와 Firefox 클립 편집기 호환 기능을 제공합니다.",
   "browser_specific_settings": {
     "gecko": {
       "id": "chzzk-catchup-firefox@local",
@@ -13,10 +13,10 @@
   "permissions": ["storage", "scripting"],
   "background": { "scripts": ["src/clip-registration.js"] },
   "host_permissions": ["https://chzzk.naver.com/*"],
-  "icons": { "48": "icons/catchup.svg", "96": "icons/catchup.svg" },
+  "icons": { "48": "icons/chzzk-jijik.svg", "96": "icons/chzzk-jijik.svg" },
   "action": {
-    "default_title": "치지직 따라잡기",
-    "default_icon": "icons/catchup.svg",
+    "default_title": "치지직지직",
+    "default_icon": "icons/chzzk-jijik.svg",
     "default_popup": "popup/popup.html"
   },
   "content_scripts": [

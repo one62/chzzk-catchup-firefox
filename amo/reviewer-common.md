@@ -1,4 +1,4 @@
-CHZZK Catch-up is a Firefox extension for https://chzzk.naver.com/.
+치지직지직 is a Firefox extension for https://chzzk.naver.com/.
 
 Build: the submitted extension contains readable JavaScript, HTML, CSS and SVG files. There is no transpilation, minification, or remote executable code required by the extension. Package manifest.json, src/, popup/, and icons/ at the archive root. Node.js is only needed for development checks (npm ci, npm test, npm run check); web-ext handles submission.
 

@@ -68,11 +68,19 @@ jobs:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: npx --no-install web-ext sign --channel listed --source-dir dist/amo/extension --amo-metadata dist/amo/metadata.json --artifacts-dir dist/amo/submitted --approval-timeout 0 --no-config-discovery
-      - name: Apply explicitly requested description changes
+      - name: Apply explicitly requested listing changes
         env:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: node tools/amo-api.mjs listing dist/amo/listing.json
+      - name: Upload reviewed store icon
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          if [ -f dist/amo/store-icon.png ]; then
+            node tools/amo-api.mjs icon dist/amo/store-icon.png
+          fi
       - name: Record submission result
         run: echo 'Submission completed. This is not confirmation of Mozilla review approval or store publication. Check AMO Developer Hub for status. Do not automatically retry a partially completed submission.' >> "$GITHUB_STEP_SUMMARY"
       - name: Record failure recovery instructions

@@ -15,7 +15,9 @@ async function request(endpoint, options = {}) {
   const token = `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`;
   const url = new URL(endpoint, base);
   assert.ok(url.href.startsWith(base), 'Unexpected AMO pagination URL');
-  const response = await fetch(url, { ...options, headers: { Authorization: `JWT ${token}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(60000) });
+  const headers = { Authorization: `JWT ${token}` };
+  if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+  const response = await fetch(url, { ...options, headers, signal: AbortSignal.timeout(60000) });
   assert.ok(response.ok, `AMO returned HTTP ${response.status}; check credentials and the existing add-on in Developer Hub`);
   return response.json();
 }
@@ -61,9 +63,20 @@ if (process.argv[1]?.endsWith('amo-api.mjs')) {
   } else if (command === 'listing') {
     const listing = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (listing) {
-      assert.deepEqual(Object.keys(listing).sort(), ['description', 'summary']);
+      const descriptionFields = ['description', 'summary'];
+      const allowedFields = listing.name ? ['name', ...(listing.summary ? descriptionFields : [])] : descriptionFields;
+      assert.deepEqual(Object.keys(listing).sort(), allowedFields.sort());
+      if (listing.name) {
+        assert.deepEqual(Object.keys(listing.name), ['ko']);
+        assert.ok(typeof listing.name.ko === 'string' && listing.name.ko.trim());
+      }
       await request(addonPath, { method: 'PATCH', body: JSON.stringify(listing) });
-      console.log('Store descriptions updated.');
-    } else console.log('Store descriptions unchanged.');
-  } else throw new Error('Use preflight <version> or listing <listing.json>');
+      console.log('스토어 정보 갱신 완료');
+    } else console.log('스토어 정보 변경 없음');
+  } else if (command === 'icon') {
+    const form = new FormData();
+    form.append('icon', new Blob([fs.readFileSync(file)], { type: 'image/png' }), 'store-icon.png');
+    await request(addonPath, { method: 'PATCH', body: form });
+    console.log('스토어 아이콘 갱신 요청 완료');
+  } else throw new Error('Use preflight <version>, listing <listing.json> or icon <store-icon.png>');
 }
