@@ -5,6 +5,7 @@
     raw = raw && typeof raw === "object" ? raw : {};
     return {
       streamMode: MODES.includes(raw.streamMode) ? raw.streamMode : "auto",
+      bufferSafetyLevel: ["low", "medium", "high"].includes(raw.bufferSafetyLevel) ? raw.bufferSafetyLevel : "medium",
       bufferAutoEnabled: typeof raw.bufferAutoEnabled === "boolean" ? raw.bufferAutoEnabled
         : typeof raw.bufferGuardEnabled === "boolean" ? raw.bufferGuardEnabled : true,
     };

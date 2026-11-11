@@ -98,7 +98,13 @@
     return { stop: false, reason: "catching-up" };
   }
 
-  const api = Object.freeze({ normalizeSettings, stopBuffer, startDecision, activeDecision });
+  function adaptiveRate(buffer, required, maximum) {
+    if (![buffer, required, maximum].every(Number.isFinite) || buffer <= required || maximum <= 1) return 1;
+    // Spend surplus over roughly four seconds, tapering toward normal speed.
+    return Math.min(maximum, Math.max(1.05, Math.floor((1 + (buffer - required) / 4) * 100) / 100));
+  }
+
+  const api = Object.freeze({ normalizeSettings, stopBuffer, startDecision, activeDecision, adaptiveRate });
   root.ChzzkCatchupAutoPolicy = api;
   if (typeof module === "object" && module.exports) module.exports = api;
 })(globalThis);

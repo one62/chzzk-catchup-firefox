@@ -18,6 +18,7 @@ const elements = {
   autoEnabled: document.getElementById("auto-enabled"),
   autoStart: document.getElementById("auto-start"),
   autoRate: document.getElementById("auto-rate"),
+  autoRateLabel: document.getElementById("auto-rate-label"),
   catchUp: document.getElementById("catch-up"),
   feedback: document.getElementById("feedback"),
   connection: document.getElementById("current-connection"),
@@ -26,6 +27,11 @@ const elements = {
   streamHls: document.getElementById("stream-hls"),
   streamLlhls: document.getElementById("stream-llhls"),
   bufferAutoEnabled: document.getElementById("buffer-auto-enabled"),
+  bufferSafetyLevel: document.getElementById("buffer-safety-level"),
+  bufferSafetyHelp: document.getElementById("buffer-safety-help"),
+  bufferIntervals: document.getElementById("buffer-intervals"),
+  bufferAmounts: document.getElementById("buffer-amounts"),
+  bufferSamples: document.getElementById("buffer-samples"),
   bufferStatus: document.getElementById("buffer-status"),
   resetBuffer: document.getElementById("reset-buffer"),
 };
@@ -60,6 +66,7 @@ function updateControls() {
   elements.autoEnabled.disabled = settingsDisabled;
   elements.autoStart.disabled = settingsDisabled;
   elements.autoRate.disabled = settingsDisabled;
+  elements.bufferSafetyLevel.disabled = settingsDisabled || !savedSettings?.bufferAutoEnabled;
   for (const element of [elements.streamAuto, elements.streamHls, elements.streamLlhls,
     elements.bufferAutoEnabled]) element.disabled = settingsDisabled;
   elements.resetBuffer.disabled = busy || !savedSettings?.bufferAutoEnabled || !currentStatus?.isLive;
@@ -223,7 +230,14 @@ function renderSettings() {
   elements.startupEnabled.checked = savedSettings.startupEnabled;
   elements.autoEnabled.checked = savedSettings.autoEnabled;
   elements.autoRate.value = String(savedSettings.autoRate);
+  elements.autoRateLabel.textContent = savedSettings.bufferAutoEnabled ? "최대 배속" : "배속";
   elements.bufferAutoEnabled.checked = savedSettings.bufferAutoEnabled;
+  elements.bufferSafetyLevel.value = savedSettings.bufferSafetyLevel;
+  elements.bufferSafetyHelp.textContent = {
+    high: "초기 여유를 크게 두고 최근 최악의 유입 상황까지 고려합니다. 끊김 방지를 우선합니다.",
+    medium: "초기 여유와 드문 유입 지연을 균형 있게 반영합니다. 기본 설정입니다.",
+    low: "초기 여유와 드문 최악값의 반영을 줄입니다. 지연은 짧아지지만 끊길 가능성이 커집니다.",
+  }[savedSettings.bufferSafetyLevel];
   for (const key of ["margin", "autoStart"]) {
     if (document.activeElement !== elements[key]) elements[key].value = String(savedSettings[key]);
   }
@@ -236,6 +250,13 @@ function renderSettings() {
 
 function renderPlaybackInfo() {
   const state = currentStatus;
+  const statistics = savedSettings?.bufferAutoEnabled && state?.isLive ? state.bufferOptimization : null;
+  const formatStats = stats => stats && [stats.min, stats.mean, stats.max].every(Number.isFinite)
+    ? `최소 ${stats.min.toFixed(2)} · 평균 ${stats.mean.toFixed(2)} · 최대 ${stats.max.toFixed(2)}초` : "학습 대기";
+  elements.bufferIntervals.textContent = `유입 간격: ${formatStats(statistics?.intervalStats)}`;
+  elements.bufferAmounts.textContent = `영상 분량: ${formatStats(statistics?.amountStats)}`;
+  elements.bufferSamples.textContent = statistics?.sampleCount
+    ? `최근 최대 2분 · ${statistics.sampleCount}회 관측` : "방송 재생 중 관측값을 표시합니다.";
   elements.connection.textContent = state?.videoFound ? playbackPolicy.connectionLabel(state.stream?.selectedKind) : "—";
   const mode = savedSettings?.streamMode ?? "auto";
   let info = "";
@@ -264,7 +285,8 @@ function renderPlaybackInfo() {
     ? `보충 간격 재확인 중 · 종료 기준 ${state.autoStopBuffer.toFixed(1)}초`
     : "보충 간격이 불안정해 따라잡기 대기");
   else details.push("버퍼 보충 주기 학습 중");
-  if (Number.isFinite(state.effectiveMargin)) details.push(`현재 남길 버퍼 ${state.effectiveMargin.toFixed(1)}초`);
+  const needed = optimization?.requiredBuffer ?? state.effectiveMargin;
+  if (Number.isFinite(needed)) details.push(`현재 남길 버퍼 ${needed.toFixed(1)}초`);
   if (Number.isFinite(optimization?.periodSeconds)) details.push(`보충 주기 ${optimization.periodSeconds.toFixed(1)}초`);
   if (Number.isFinite(optimization?.jitterSeconds)) details.push(`변동 ${optimization.jitterSeconds.toFixed(1)}초`);
   if (Number.isFinite(state.effectiveAutoStart ?? state.autoStart)) {
@@ -319,6 +341,8 @@ applyOption("autoEnabled", element => element.checked);
 applyOption("autoRate", element => Number(element.value), value =>
   [1.1, 1.2, 1.5, 2].includes(value) ? "" : "배속은 목록에서 선택해 주세요.");
 applyOption("bufferAutoEnabled", element => element.checked);
+applyOption("bufferSafetyLevel", element => element.value, value =>
+  ["low", "medium", "high"].includes(value) ? "" : "안전 수준은 목록에서 선택해 주세요.");
 applyOption("autoStart", element => element.valueAsNumber, value => {
   if (!Number.isFinite(value) || value < 2 || value > 30) return "시작 버퍼는 2~30초 사이로 입력해 주세요.";
   if (!savedSettings.bufferAutoEnabled && value < savedSettings.margin + 0.5) {

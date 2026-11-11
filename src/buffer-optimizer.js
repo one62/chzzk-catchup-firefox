@@ -9,7 +9,15 @@
   const MAX_IDLE_MS = 1000;
   const EDGE_EPSILON = 0.04;
   const MIN_SAMPLES = 6;
-  const MAX_SAMPLES = 8;
+  const MAX_SAMPLES = 480;
+  const HISTORY_MS = 120000;
+  const RECENT_MS = 20000;
+  const HORIZON = 3;
+  const PROFILES = Object.freeze({
+    low: Object.freeze({ reserve: 0.4, maxReserve: 2, stallStep: 0.3, maxWeight: 0.25 }),
+    medium: Object.freeze({ reserve: 0.6, maxReserve: 3, stallStep: 0.5, maxWeight: 0.6 }),
+    high: Object.freeze({ reserve: 1, maxReserve: 5, stallStep: 0.8, maxWeight: 1 }),
+  });
   const DECAY_DELAY_MS = 30000;
   const DECAY_PER_SECOND = 0.005;
 
@@ -19,13 +27,30 @@
     return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
   }
 
-  function create() {
-    let samples = [], lastArrival = null, arrivalEdge = null, previous = null;
-    let highWater = null, lastProgressAt = null, pending = null;
-    let reserve = MIN_MARGIN, unsettled = false, stableSince = null, lastDecayAt = null;
+  function statistics(values) {
+    if (!values.length) return null;
+    return { min: Math.min(...values), max: Math.max(...values),
+      mean: values.reduce((sum, value) => sum + value, 0) / values.length };
+  }
 
-    function clearLearning(unstable = false) {
-      samples = [];
+  function upperEstimate(values, weight) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const upper = sorted[Math.ceil(sorted.length * 0.8) - 1];
+    return upper + (sorted[sorted.length - 1] - upper) * weight;
+  }
+
+  function create(level = "medium") {
+    let safetyLevel = Object.hasOwn(PROFILES, level) ? level : "medium";
+    let profile = PROFILES[safetyLevel];
+    let samples = [], lastArrival = null, arrivalEdge = null, previous = null;
+    let freshSamples = 0, chain = 0;
+    let highWater = null, lastProgressAt = null, pending = null;
+    let reserve = profile.reserve, unsettled = false, stableSince = null, lastDecayAt = null;
+
+    function clearLearning(unstable = false, keepHistory = false) {
+      if (!keepHistory) samples = [];
+      freshSamples = 0;
+      chain++;
       lastArrival = null;
       arrivalEdge = null;
       stableSince = null;
@@ -43,7 +68,15 @@
 
     function reset() {
       suspend();
-      reserve = MIN_MARGIN;
+      reserve = profile.reserve;
+    }
+
+    function configure(level) {
+      const next = Object.hasOwn(PROFILES, level) ? level : "medium";
+      if (next === safetyLevel) return;
+      safetyLevel = next;
+      profile = PROFILES[next];
+      reset();
     }
 
     function cancel() { pending = null; }
@@ -58,15 +91,37 @@
       const period = median(periods);
       const jitter = Math.max(0.1, Math.max(...periods) - period,
         median(periods.map(value => Math.abs(value - period))) * 1.5);
-      const spread = Math.max(...periods) - Math.min(...periods);
-      // Adding currentTime to forwardBuffer removes playback-rate consumption.
-      // Check received media too: tiny/huge append bursts do not establish a live cadence.
-      const received = samples.reduce((sum, sample) => sum + sample.amount, 0);
-      const elapsed = periods.reduce((sum, value) => sum + value, 0);
-      const supplyRatio = received / elapsed;
-      return { period, jitter, reliable: samples.length >= MIN_SAMPLES &&
-        period >= 0.1 && period <= 12 && spread <= Math.max(0.5, period * 0.5) &&
-        supplyRatio >= 0.5 && supplyRatio <= 2.5 };
+      const recentIndex = samples.findIndex(sample => sample.at >= previous.at - RECENT_MS);
+      const recent = samples.slice(Math.min(recentIndex < 0 ? samples.length : recentIndex,
+        Math.max(0, samples.length - MIN_SAMPLES)));
+      const supply = values => values.reduce((sum, sample) => sum + sample.amount, 0) /
+        values.reduce((sum, sample) => sum + sample.seconds, 0);
+      // Short-lived deterioration must not be hidden by a long healthy history.
+      const supplyRatio = Math.min(supply(recent), supply(samples.slice(-MIN_SAMPLES)));
+      return { period, jitter, recent, supplyRatio,
+        intervalStats: statistics(periods), amountStats: statistics(samples.map(sample => sample.amount)),
+        reliable: freshSamples >= MIN_SAMPLES && recent.length >= MIN_SAMPLES &&
+          period >= 0.1 && period <= 12 && supplyRatio >= 0.9 && supplyRatio <= 2.5 };
+    }
+
+    function forecast(history, elapsed, rate) {
+      const deficits = [];
+      // Replay consecutive interval/amount pairs, including each pre-arrival trough.
+      // Condition the first interval on the wait already observed. No wraparound:
+      // joining unrelated ends of a trace invents a supply pattern.
+      for (let start = 0; start <= history.length - HORIZON; start++) {
+        if (history[start].chain !== history[start + HORIZON - 1].chain) continue;
+        if (history[start].seconds + CONTROL_SECONDS <= elapsed) continue;
+        let time = CONTROL_SECONDS - elapsed, received = 0, deficit = 0;
+        for (let offset = 0; offset < HORIZON; offset++) {
+          const sample = history[start + offset];
+          time += sample.seconds;
+          deficit = Math.max(deficit, time * rate - received);
+          received += sample.amount;
+        }
+        deficits.push(deficit);
+      }
+      return deficits.length ? upperEstimate(deficits, profile.maxWeight) : null;
     }
 
     function valid(state) {
@@ -96,8 +151,8 @@
       if (state?.waiting) begin(now);
       if (pending && !pending.counted && now - pending.at >= MIN_STALL_MS) {
         pending.counted = true;
-        reserve = Math.min(MAX_MARGIN, Math.max(reserve + 0.5, reserve * 1.35));
-        clearLearning(true);
+        reserve = Math.min(profile.maxReserve, Math.max(reserve + profile.stallStep, reserve * 1.35));
+        clearLearning(true, true);
       }
       // Waiting may temporarily remove the current buffered range. The confirmed
       // stall above owns the reserve increase; duplicate events cannot raise it again.
@@ -151,7 +206,8 @@
           const seconds = (now - lastArrival) / 1000;
           const amount = edge - arrivalEdge;
           if (seconds >= 0.05 && amount > EDGE_EPSILON) {
-            samples.push({ seconds, amount });
+            samples.push({ seconds, amount, at: now, chain });
+            freshSamples++;
             if (samples.length > MAX_SAMPLES) samples.shift();
           } else {
             clearLearning(true);
@@ -162,14 +218,14 @@
         highWater = edge;
       }
       previous = { at: now, time: state.currentTime, edge, rate: state.playbackRate };
+      samples = samples.filter(sample => sample.at >= now - HISTORY_MS);
       const prediction = estimate();
       const late = prediction && lastArrival !== null &&
-        (now - lastArrival) / 1000 > prediction.period + prediction.jitter +
-          Math.max(CONTROL_SECONDS, prediction.period * 0.25);
+        (now - lastArrival) / 1000 >= prediction.intervalStats.max + CONTROL_SECONDS;
       if (prediction?.reliable && !late && pending === null) {
         if (stableSince === null) stableSince = now;
         if (lastDecayAt !== null && now - stableSince >= DECAY_DELAY_MS) {
-          reserve = Math.max(MIN_MARGIN, reserve - (now - lastDecayAt) / 1000 * DECAY_PER_SECOND);
+          reserve = Math.max(profile.reserve, reserve - (now - lastDecayAt) / 1000 * DECAY_PER_SECOND);
         }
         lastDecayAt = now;
       } else {
@@ -182,11 +238,17 @@
       const prediction = estimate();
       const elapsed = lastArrival === null || !Number.isFinite(now)
         ? null : (now - lastArrival) / 1000;
-      const remaining = prediction && elapsed !== null ? Math.max(0, prediction.period - elapsed) : null;
-      const result = { margin: reserve, requiredBuffer: null, playbackSafe: false,
+      const residuals = prediction && elapsed !== null ? samples
+        .filter(sample => sample.seconds + CONTROL_SECONDS > elapsed)
+        .map(sample => sample.seconds + CONTROL_SECONDS - elapsed) : [];
+      const remaining = residuals.length ? upperEstimate(residuals, profile.maxWeight) : null;
+      const result = { margin: Math.min(MAX_MARGIN, reserve), requiredBuffer: null, playbackSafe: false,
         phase: unsettled ? "unstable" : "learning",
         sampleCount: samples.length, periodSeconds: prediction?.period ?? null,
-        jitterSeconds: prediction?.jitter ?? null, remainingSeconds: remaining, safe: false };
+        jitterSeconds: prediction?.jitter ?? null, remainingSeconds: remaining, safe: false,
+        safetyLevel, reserveSeconds: reserve, intervalStats: prediction?.intervalStats ?? null,
+        amountStats: prediction?.amountStats ?? null, supplyRatio: prediction?.supplyRatio ?? null,
+        elapsedSinceArrival: elapsed };
       if (!enabled) {
         result.margin = Number.isFinite(manualMargin) ? Math.min(MAX_MARGIN, Math.max(0.2, manualMargin)) : MIN_MARGIN;
         result.requiredBuffer = result.margin;
@@ -197,8 +259,7 @@
       }
       const fresh = Number.isFinite(now) && previous && now >= previous.at &&
         now - previous.at <= MAX_OBSERVATION_GAP_MS;
-      const late = prediction && elapsed !== null && (elapsed < 0 || elapsed >
-        prediction.period + prediction.jitter + Math.max(CONTROL_SECONDS, prediction.period * 0.25));
+      const late = prediction && elapsed !== null && (elapsed < 0 || remaining === null);
       if (!fresh || pending !== null || late || (prediction && !prediction.reliable && samples.length >= MIN_SAMPLES)) {
         result.phase = previous || unsettled || prediction ? "unstable" : "learning";
         return result;
@@ -209,25 +270,24 @@
         result.phase = "unstable";
         return result;
       }
-      // Continue at the selected speed for at most one control tick, then
-      // allow a return to normal speed until the next expected append.
-      // Charging the entire interval at the fast rate would reject healthy
-      // streams at every replenishment, even when normal playback is safe.
-      // A user's custom speed, which we do not own, needs the full interval.
-      const consumption = controlled
-        ? remaining + prediction.jitter + CONTROL_SECONDS * Math.max(1, rate)
-        : (remaining + prediction.jitter + CONTROL_SECONDS) * rate;
-      const needed = Math.max(reserve, consumption + reserve - MIN_MARGIN);
+      // We can restore owned speed next tick; custom speed consumes at that
+      // rate throughout the horizon. Never cap a required reserve to call it safe.
+      const baseRate = controlled ? 1 : rate;
+      const historical = forecast(samples, elapsed, baseRate);
+      const recent = forecast(prediction.recent, elapsed, baseRate);
+      if (historical === null) { result.phase = "unstable"; return result; }
+      const needed = reserve + Math.max(historical, recent ?? 0) +
+        (controlled ? CONTROL_SECONDS * Math.max(0, rate - 1) : 0);
       result.margin = Math.min(MAX_MARGIN, Math.ceil((needed - Number.EPSILON) * 10) / 10);
       result.requiredBuffer = needed;
       // Automatic playback can use an existing buffer above the manual seek
       // target cap. `safe` still describes whether a seek can honor that cap.
-      result.playbackSafe = true;
+      result.playbackSafe = needed <= 29.5; // Leave the start hysteresis below the 30s setting limit.
       result.safe = needed <= MAX_MARGIN;
       return result;
     }
 
-    return { observe, begin, cancel, suspend, reset, status };
+    return { observe, begin, cancel, suspend, reset, configure, status };
   }
 
   const api = Object.freeze({ create });

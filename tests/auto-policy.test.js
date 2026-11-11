@@ -237,3 +237,13 @@ test("invalid sessions stop safely and policy decisions never mutate inputs", ()
   assert.equal(playback.currentTime, 90);
   assert.equal(playback.playbackRate, 1);
 });
+
+test("adaptive speed tapers with surplus and never exceeds the selected maximum", () => {
+  assert.equal(policy.adaptiveRate(1, 1, 2), 1);
+  assert.equal(policy.adaptiveRate(0.5, 1, 2), 1);
+  assert.equal(policy.adaptiveRate(NaN, 1, 2), 1);
+  const rates = [0.1, 0.5, 1, 2, 8].map(extra => policy.adaptiveRate(2 + extra, 2, 1.5));
+  assert.ok(rates.every(rate => rate > 1 && rate <= 1.5));
+  assert.deepEqual([...rates].sort((a, b) => a - b), rates);
+  assert.equal(rates.at(-1), 1.5);
+});

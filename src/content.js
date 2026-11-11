@@ -7,7 +7,6 @@
   const autoPolicy = globalThis.ChzzkCatchupAutoPolicy;
   const playbackPolicy = globalThis.ChzzkCatchupPlaybackPolicy;
   const bufferOptimizer = globalThis.ChzzkCatchupBufferOptimizer.create();
-  const BUFFER_AUTO_FALLBACK_TARGET = 3;
   let playbackPreferences = {};
   let playbackSettings = playbackPolicy.normalize();
   let bufferIgnoreUntil = 0;
@@ -213,7 +212,7 @@
     const state = status();
     const now = monotonicNow();
     const optimization = bufferOptimization(autoSession?.rate ?? autoSettings.autoRate, true);
-    if (playbackSettings.bufferAutoEnabled && !optimization.playbackSafe && !autoSession) {
+    if (playbackSettings.bufferAutoEnabled && !optimization.playbackSafe) {
       stopAuto(optimization.phase === "learning" ? "buffer-learning" : "buffer-unstable");
       return;
     }
@@ -233,13 +232,31 @@
       // Refresh the target as the next replenishment approaches; a target
       // captured only at session start becomes stale when a chunk arrives.
       if (playbackSettings.bufferAutoEnabled) {
-        const requiredBuffer = optimization.playbackSafe
-          ? optimization.requiredBuffer : BUFFER_AUTO_FALLBACK_TARGET;
+        const requiredBuffer = optimization.requiredBuffer;
         autoSession.margin = Math.min(3, requiredBuffer);
         autoSession.requiredBuffer = requiredBuffer;
       }
       const decision = autoPolicy.activeDecision(state, autoSession, now);
-      if (decision.stop) stopAuto(decision.reason);
+      if (decision.stop) { stopAuto(decision.reason); return; }
+      if (playbackSettings.bufferAutoEnabled) {
+        const desired = autoPolicy.adaptiveRate(state.forwardBuffer, autoSession.requiredBuffer, autoSettings.autoRate);
+        const rate = Math.min(desired, Math.round((autoSession.rate + 0.05) * 100) / 100);
+        if (!sameRate(rate, autoSession.rate)) {
+          // Publish ownership before a synchronous ratechange event can fire.
+          const previousRate = autoSession.rate;
+          autoSession.rate = rate;
+          try {
+            video.playbackRate = rate;
+            if (!sameRate(video.playbackRate, rate)) {
+              if (autoSession && sameRate(video.playbackRate, previousRate)) autoSession.rate = previousRate;
+              stopAuto("rate-failed");
+            }
+          } catch {
+            if (autoSession && sameRate(video.playbackRate, previousRate)) autoSession.rate = previousRate;
+            stopAuto("rate-failed");
+          }
+        }
+      }
       return;
     }
     if (userRewound) { autoReason = autoMessages.rewind; return; }
@@ -254,7 +271,13 @@
     }
     const requiredBuffer = playbackSettings.bufferAutoEnabled
       ? optimization.requiredBuffer : effectiveMargin();
-    autoSession = { video, originalRate: state.playbackRate, rate: autoSettings.autoRate,
+    if (playbackSettings.bufferAutoEnabled && state.forwardBuffer < requiredBuffer + 0.5) {
+      autoReason = autoMessages["below-threshold"];
+      return;
+    }
+    const rate = playbackSettings.bufferAutoEnabled
+      ? autoPolicy.adaptiveRate(state.forwardBuffer, requiredBuffer, autoSettings.autoRate) : autoSettings.autoRate;
+    autoSession = { video, originalRate: state.playbackRate, rate,
       margin: Math.min(3, requiredBuffer), requiredBuffer, startedAt: now,
       lastProgressAt: now, lastProgressPosition: state.currentTime };
     resetLatency();
@@ -274,13 +297,13 @@
   function autoStopMargin(rate = autoSession?.rate ?? autoSettings.autoRate) {
     if (!playbackSettings.bufferAutoEnabled) return autoPolicy.stopBuffer(effectiveMargin());
     const optimization = bufferOptimization(rate, true);
-    return optimization.playbackSafe ? optimization.requiredBuffer : BUFFER_AUTO_FALLBACK_TARGET;
+    return optimization.requiredBuffer ?? optimization.reserveSeconds;
   }
   function effectiveAutoSettings() {
     const target = autoStopMargin();
     const normalizedTarget = Math.min(3, Math.max(0.2, target));
     return autoPolicy.normalizeSettings({ ...autoSettings,
-      autoStart: Math.max(autoSettings.autoStart, target + 0.5) }, normalizedTarget);
+      autoStart: Math.max(autoSettings.autoStart, Math.ceil((target + 0.5) * 10) / 10) }, normalizedTarget);
   }
 
   function canCountBuffering() {
@@ -374,8 +397,9 @@
     if (event.type === "waiting" && canCountBuffering()) bufferOptimizer.begin(monotonicNow());
     if (event.type === "playing") { stepBufferOptimizer(); bufferOptimizer.cancel(); }
     if (["pause", "seeking", "seeked", "emptied", "loadedmetadata", "ended", "error"].includes(event.type)) ignoreBuffering();
-    if (["waiting", "pause", "playing", "seeking", "seeked", "ratechange",
+    if (["waiting", "pause", "playing", "seeking", "seeked",
       "ended", "error"].includes(event.type)) resetLatency();
+    if (event.type === "ratechange" && (!autoSession || !sameRate(video.playbackRate, autoSession.rate))) resetLatency();
     // stalled describes media fetching. Buffered playback can continue and
     // may not emit playing again; never latch waiting on this network event.
     // Real shortages are still handled by readyState/buffer in stepAuto().
@@ -705,6 +729,7 @@
     playbackPreferences = nextPlayback;
     playbackSettings = playbackPolicy.normalize(nextPlayback);
     if (changes.streamMode) { streamBlockedUntil = 0; streamFailures = 0; streamResult = null; }
+    bufferOptimizer.configure(playbackSettings.bufferSafetyLevel);
     if (changes.margin || changes.bufferAutoEnabled || changes.bufferGuardEnabled) resetBufferOptimizer();
     startupPlayback = null;
     autoSettings = autoPolicy.normalizeSettings(playbackPreferences, playbackSettings.bufferAutoEnabled ? 0.2 : margin);
@@ -759,12 +784,13 @@
       .addEventListener(name, render, { passive: true });
   }
   browser.storage.local.get({ catchupEnabled: true, margin: 0.6, startupEnabled: true, autoEnabled: true, autoStart: 3, autoRate: 1.5,
-    streamMode: "auto", bufferAutoEnabled: null, bufferGuardEnabled: null }).then((saved) => {
+    streamMode: "auto", bufferAutoEnabled: null, bufferGuardEnabled: null, bufferSafetyLevel: "medium" }).then((saved) => {
     if (!enabledChanged) catchupEnabled = saved.catchupEnabled !== false;
     margin = media.normalizeMargin(saved.margin);
     startupEnabled = saved.startupEnabled !== false;
     playbackPreferences = saved;
     playbackSettings = playbackPolicy.normalize(saved);
+    bufferOptimizer.configure(playbackSettings.bufferSafetyLevel);
     autoSettings = autoPolicy.normalizeSettings(saved, playbackSettings.bufferAutoEnabled ? 0.2 : margin);
     settingsReady = true;
     refreshVideo();

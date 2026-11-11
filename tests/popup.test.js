@@ -345,3 +345,42 @@ test("optimization learning state explains catch-up availability and reset is li
     assert.equal(waiting.elements.get("reset-buffer").disabled, false);
   }
 });
+
+test("safety level persists independently, follows external changes and restores failed saves", async () => {
+  const app = await harness({ bufferAutoEnabled: true, margin: 2.5 }, { url: "about:newtab" });
+  const level = app.elements.get("buffer-safety-level");
+  assert.equal(level.value, "medium");
+  assert.equal(level.disabled, false);
+  assert.equal(app.elements.get("auto-rate-label").textContent, "최대 배속");
+  level.value = "high";
+  level.emit("change");
+  await flush();
+  assert.equal(app.stored.bufferSafetyLevel, "high");
+  assert.equal(app.stored.margin, 2.5);
+  assert.deepEqual(Object.keys(app.writes[0]), ["bufferSafetyLevel"]);
+  app.rejectAutoSave();
+  level.value = "low";
+  level.emit("change");
+  await flush();
+  assert.equal(level.value, "high");
+  app.changeStorage({ bufferSafetyLevel: "low" });
+  assert.equal(level.value, "low");
+  app.changeStorage({ bufferAutoEnabled: false });
+  assert.equal(level.disabled, true);
+  assert.equal(app.elements.get("auto-rate-label").textContent, "배속");
+  app.changeStorage({ bufferAutoEnabled: true });
+  assert.equal(level.value, "low");
+});
+
+test("popup shows arrival statistics separately and does not misreport a capped reserve", async () => {
+  const app = await harness({ bufferAutoEnabled: true, effectiveMargin: 3,
+    bufferOptimization: { phase: "tracking", safe: false, requiredBuffer: 4.5, sampleCount: 12,
+      intervalStats: { min: 1, mean: 2, max: 4 }, amountStats: { min: 0.5, mean: 2, max: 3 } } });
+  assert.match(app.elements.get("buffer-intervals").textContent, /최소 1\.00.*평균 2\.00.*최대 4\.00초/);
+  assert.match(app.elements.get("buffer-amounts").textContent, /최소 0\.50.*평균 2\.00.*최대 3\.00초/);
+  assert.match(app.elements.get("buffer-samples").textContent, /12회/);
+  assert.match(app.elements.get("buffer-status").textContent, /4\.5초/);
+  assert.equal(app.elements.get("catch-up").disabled, true);
+  app.changeStorage({ bufferAutoEnabled: false });
+  assert.match(app.elements.get("buffer-intervals").textContent, /학습 대기/);
+});

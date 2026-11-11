@@ -1241,7 +1241,8 @@ test("optimization waits for learning and then uses a fresh rate-aware target", 
   await replenish(app);
   const state = (await app.send("get-status")).status;
   assert.equal(state.bufferOptimization.phase, "tracking");
-  assert.equal(app.video.playbackRate, 2);
+  assert.ok(app.video.playbackRate > 1 && app.video.playbackRate < 2);
+  assert.ok(app.video.rateWrites.every(rate => rate >= 1 && rate <= 2));
   assert.ok(state.autoStopBuffer > state.effectiveMargin);
   assert.ok(state.effectiveAutoStart >= state.autoStopBuffer + 0.5 - 0.001);
   app.video.player.markers = [new Element()];
@@ -1261,21 +1262,92 @@ test("two-second replenishment keeps an owned 1.5x session running across new ar
   assert.equal(state.lastAutoStop, null);
 });
 
-test("custom-speed seeks retain enough buffer for the full next arrival interval", async () => {
-  const app = await harness({ playbackRate: 2, buffered: ranges([[0, 180]]) },
+test("an overdue arrival stops owned speed while more than three seconds remain buffered", async () => {
+  const app = await harness({ buffered: ranges([[0, 150]]) },
+    { bufferAutoEnabled: true, autoEnabled: true });
+  await replenish(app, 20, 2);
+  assert.equal(app.video.playbackRate, 1.5);
+  for (let i = 0; i < 9; i++) {
+    app.video.elapse(0.25 * app.video.playbackRate);
+    app.advance(250); await flush();
+  }
+  const state = (await app.send("get-status")).status;
+  assert.ok(state.forwardBuffer > 3);
+  assert.equal(state.bufferOptimization.phase, "unstable");
+  assert.equal(state.lastAutoStop.reason, "buffer-unstable");
+  assert.equal(app.video.playbackRate, 1);
+});
+
+test("safety settings apply on load and live changes stop speed and relearn", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true, bufferSafetyLevel: "high", margin: 2.5 });
+  assert.equal((await app.send("get-status")).status.bufferOptimization.reserveSeconds, 1);
+  await replenish(app, 12);
+  assert.ok(app.video.playbackRate > 1);
+  app.changeStorage({ bufferSafetyLevel: "low" });
+  const state = (await app.send("get-status")).status;
+  assert.equal(app.video.playbackRate, 1);
+  assert.equal(state.bufferSafetyLevel, "low");
+  assert.equal(state.bufferOptimization.phase, "learning");
+  assert.equal(state.bufferOptimization.reserveSeconds, 0.4);
+  assert.equal(state.margin, 2.5);
+});
+
+test("owned adaptive rate events retain latency samples while external speed stays untouched", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true, autoRate: 2 });
+  await replenish(app, 12);
+  assert.ok(app.video.playbackRate > 1 && app.video.playbackRate < 2);
+  app.respondLatency(3);
+  app.video.emit("ratechange");
+  assert.equal((await app.send("get-status")).status.playerLatency, 3);
+  app.video.playbackRate = 1.3;
+  app.video.emit("ratechange");
+  assert.equal((await app.send("get-status")).status.autoActive, false);
+  assert.equal(app.video.playbackRate, 1.3);
+});
+
+test("closed-loop playback keeps a positive buffer while catching up on variable refill cycles", async () => {
+  for (const bufferSafetyLevel of ["low", "medium", "high"]) {
+    const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true, autoRate: 2, bufferSafetyLevel });
+    let edge = app.video.buffered.end(0), minimum = Infinity, accelerated = 0;
+    // Paired short/long intervals preserve average supply, with small batches
+    // followed by compensating larger batches. Exercise actual content control.
+    const cycles = [[1.75, 1.75], [2.25, 2.25], [2, 1.75], [2, 2.25]];
+    for (let cycle = 0; cycle < 60; cycle++) {
+      const [interval, amount] = cycles[cycle % cycles.length];
+      for (let tick = 0; tick < interval * 4; tick++) {
+        const rate = app.video.playbackRate;
+        accelerated += (rate - 1) * 0.25;
+        app.video.elapse(0.25 * rate);
+        minimum = Math.min(minimum, edge - app.video.currentTime);
+        if (tick === interval * 4 - 1) {
+          edge += amount;
+          app.video.buffered = ranges([[0, edge]]);
+        }
+        app.advance(250); await flush();
+      }
+    }
+    assert.ok(minimum > 0, `${bufferSafetyLevel}: minimum ${minimum}`);
+    assert.ok(accelerated > 2, `${bufferSafetyLevel}: catch-up ${accelerated}`);
+    assert.ok(app.video.rateWrites.every(rate => rate >= 1 && rate <= 2));
+    assert.equal(app.video.seekWrites.length, 0);
+  }
+});
+
+test("custom-speed seeks budget consumption over consecutive arrivals without changing user speed", async () => {
+  const app = await harness({ playbackRate: 1.2, buffered: ranges([[0, 180]]) },
     { bufferAutoEnabled: true, autoEnabled: false });
   await replenish(app, 16, 2);
   let state = (await app.send("get-status")).status;
   assert.equal(state.bufferOptimization.phase, "tracking");
   assert.equal(state.bufferOptimization.safe, false);
   assert.equal((await app.send("catch-up")).ok, false);
-  for (let i = 0; i < 5; i++) { app.video.elapse(0.5); app.advance(250); await flush(); }
+  for (let i = 0; i < 5; i++) { app.video.elapse(0.3); app.advance(250); await flush(); }
   state = (await app.send("get-status")).status;
   assert.equal(state.bufferOptimization.safe, true);
   const expectedMargin = state.effectiveMargin;
   assert.equal((await app.send("catch-up")).ok, true);
   assert.ok(app.video.buffered.end(0) - app.video.seekWrites[0] >= expectedMargin - 0.001);
-  assert.equal(app.video.playbackRate, 2);
+  assert.equal(app.video.playbackRate, 1.2);
   assert.equal(app.video.rateWrites.length, 0);
 });
 
@@ -1283,14 +1355,14 @@ test("immediate catch-up observes a chunk arriving between control ticks before 
   const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: false });
   await replenish(app, 16, 2);
   for (let i = 0; i < 8; i++) { app.video.elapse(0.25); app.advance(250); await flush(); }
-  assert.equal((await app.send("get-status")).status.effectiveMargin, 0.6);
+  assert.equal((await app.send("get-status")).status.effectiveMargin, 0.9);
   const newEdge = app.video.buffered.end(0) + 2;
   app.video.buffered = ranges([[0, newEdge]]);
   app.video.elapse(0.125);
   app.advance(125);
   const response = await app.send("catch-up");
   assert.equal(response.ok, true);
-  assert.ok(newEdge - app.video.seekWrites[0] >= 2.3);
+  assert.ok(newEdge - app.video.seekWrites[0] >= 2.85);
 });
 
 test("a user rewind keeps learning so explicit catch-up can return after relearning", async () => {

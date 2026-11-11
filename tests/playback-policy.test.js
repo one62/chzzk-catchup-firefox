@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const policy = require("../src/playback-policy.js");
 
 test("automatic buffer preference migrates the legacy switch while explicit new choices win", () => {
-  assert.deepEqual(policy.normalize(), { streamMode: "auto", bufferAutoEnabled: true });
+  assert.deepEqual(policy.normalize(), { streamMode: "auto", bufferAutoEnabled: true, bufferSafetyLevel: "medium" });
   assert.equal(policy.normalize({ bufferGuardEnabled: false }).bufferAutoEnabled, false);
   assert.equal(policy.normalize({ bufferGuardEnabled: true }).bufferAutoEnabled, true);
   assert.equal(policy.normalize({ bufferAutoEnabled: false, bufferGuardEnabled: true }).bufferAutoEnabled, false);
@@ -24,4 +24,13 @@ test("connection preferences accept and describe only supported modes", () => {
   assert.equal(policy.connectionLabel(null), "연결 확인 중");
   assert.equal(policy.matchesMode("main", "llhls"), false);
   assert.equal(policy.matchesMode("low-latency-p2p", "auto"), true);
+});
+
+test("safety level accepts only the three stored choices and defaults to medium", () => {
+  for (const bufferSafetyLevel of ["low", "medium", "high"]) {
+    assert.equal(policy.normalize({ bufferSafetyLevel }).bufferSafetyLevel, bufferSafetyLevel);
+  }
+  for (const bufferSafetyLevel of [null, undefined, "", "toString", true, 0]) {
+    assert.equal(policy.normalize({ bufferSafetyLevel }).bufferSafetyLevel, "medium");
+  }
 });

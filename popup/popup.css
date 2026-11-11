@@ -100,6 +100,10 @@ button:disabled { cursor: default; opacity: 0.4; }
 .stream-buttons .button { flex: 1; padding: 8px 6px; font-size: 11px; }
 .stream-buttons [aria-pressed="true"] { border-color: #79d6d0; color: #92deda; }
 #buffer-auto-form .toggle-row { margin-bottom: 0; }
+#buffer-auto-form .safety-label { display: block; margin: 12px 0 8px; color: #c6d3d8; font-size: 12px; }
+.buffer-statistics { margin-top: 10px; color: #a7bbc3; font-size: 11px; }
+.buffer-statistics summary { cursor: pointer; }
+.buffer-statistics .help { margin-top: 4px; }
 #reset-buffer { display: block; margin-top: 6px; }
 
 @media (max-width: 300px) {
