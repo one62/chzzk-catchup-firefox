@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "치지직지직",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "치지직 자동 배속·따라잡기, 지연·버퍼 표시, 하단 채팅 배치와 Firefox 클립 편집기 호환 기능을 제공합니다.",
   "browser_specific_settings": {
     "gecko": {

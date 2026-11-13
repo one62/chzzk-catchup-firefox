@@ -1,0 +1,5 @@
+Version 0.4.1 updates live catch-up and reorganizes the popup. Automatic optimization estimates the required playback buffer from recent changes in the continuous buffered range. It uses that estimate to choose when to start catch-up, adjusts playback speed up to the user-selected maximum, and stops accelerating when playback headroom is insufficient or the estimate is unreliable. Users can choose one of three safety levels.
+
+To test, open a CHZZK live broadcast and enable speed catch-up and automatic optimization. Check that the manual start and reserve buffer fields are disabled and that the maximum rate remains adjustable. Disable optimization to verify that the saved manual settings are available again. The immediate catch-up button is directly below the live metrics.
+
+The add-on ID, permissions, host access, and data collection declaration are unchanged. All 218 automated tests and the repository checks passed. Earlier JTBC live measurements used an instrumented copy before the final changes and did not cover the final package. The local measurement tools and logs are outside the release.
