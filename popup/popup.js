@@ -13,7 +13,6 @@ const elements = {
   edge: document.getElementById("edge-distance"),
   buffer: document.getElementById("forward-buffer"),
   margin: document.getElementById("margin"),
-  marginHelp: document.getElementById("margin-help"),
   startupEnabled: document.getElementById("startup-enabled"),
   autoEnabled: document.getElementById("auto-enabled"),
   autoStart: document.getElementById("auto-start"),
@@ -28,10 +27,6 @@ const elements = {
   streamLlhls: document.getElementById("stream-llhls"),
   bufferAutoEnabled: document.getElementById("buffer-auto-enabled"),
   bufferSafetyLevel: document.getElementById("buffer-safety-level"),
-  bufferSafetyHelp: document.getElementById("buffer-safety-help"),
-  bufferIntervals: document.getElementById("buffer-intervals"),
-  bufferAmounts: document.getElementById("buffer-amounts"),
-  bufferSamples: document.getElementById("buffer-samples"),
   bufferStatus: document.getElementById("buffer-status"),
   resetBuffer: document.getElementById("reset-buffer"),
 };
@@ -60,11 +55,9 @@ function updateControls() {
   const settingsDisabled = busy || !savedSettings;
   const marginLocked = savedSettings?.bufferAutoEnabled || elements.bufferAutoEnabled.checked;
   elements.margin.disabled = settingsDisabled || marginLocked;
-  elements.marginHelp.textContent = marginLocked
-    ? "자동 최적화를 끄면 남길 버퍼를 직접 설정할 수 있어요." : "";
   elements.startupEnabled.disabled = settingsDisabled;
   elements.autoEnabled.disabled = settingsDisabled;
-  elements.autoStart.disabled = settingsDisabled;
+  elements.autoStart.disabled = settingsDisabled || marginLocked;
   elements.autoRate.disabled = settingsDisabled;
   elements.bufferSafetyLevel.disabled = settingsDisabled || !savedSettings?.bufferAutoEnabled;
   for (const element of [elements.streamAuto, elements.streamHls, elements.streamLlhls,
@@ -233,11 +226,6 @@ function renderSettings() {
   elements.autoRateLabel.textContent = savedSettings.bufferAutoEnabled ? "최대 배속" : "배속";
   elements.bufferAutoEnabled.checked = savedSettings.bufferAutoEnabled;
   elements.bufferSafetyLevel.value = savedSettings.bufferSafetyLevel;
-  elements.bufferSafetyHelp.textContent = {
-    high: "초기 여유를 크게 두고 최근 최악의 유입 상황까지 고려합니다. 끊김 방지를 우선합니다.",
-    medium: "초기 여유와 드문 유입 지연을 균형 있게 반영합니다. 기본 설정입니다.",
-    low: "초기 여유와 드문 최악값의 반영을 줄입니다. 지연은 짧아지지만 끊길 가능성이 커집니다.",
-  }[savedSettings.bufferSafetyLevel];
   for (const key of ["margin", "autoStart"]) {
     if (document.activeElement !== elements[key]) elements[key].value = String(savedSettings[key]);
   }
@@ -250,13 +238,6 @@ function renderSettings() {
 
 function renderPlaybackInfo() {
   const state = currentStatus;
-  const statistics = savedSettings?.bufferAutoEnabled && state?.isLive ? state.bufferOptimization : null;
-  const formatStats = stats => stats && [stats.min, stats.mean, stats.max].every(Number.isFinite)
-    ? `최소 ${stats.min.toFixed(2)} · 평균 ${stats.mean.toFixed(2)} · 최대 ${stats.max.toFixed(2)}초` : "학습 대기";
-  elements.bufferIntervals.textContent = `유입 간격: ${formatStats(statistics?.intervalStats)}`;
-  elements.bufferAmounts.textContent = `영상 분량: ${formatStats(statistics?.amountStats)}`;
-  elements.bufferSamples.textContent = statistics?.sampleCount
-    ? `최근 최대 2분 · ${statistics.sampleCount}회 관측` : "방송 재생 중 관측값을 표시합니다.";
   elements.connection.textContent = state?.videoFound ? playbackPolicy.connectionLabel(state.stream?.selectedKind) : "—";
   const mode = savedSettings?.streamMode ?? "auto";
   let info = "";
@@ -289,8 +270,8 @@ function renderPlaybackInfo() {
   if (Number.isFinite(needed)) details.push(`현재 남길 버퍼 ${needed.toFixed(1)}초`);
   if (Number.isFinite(optimization?.periodSeconds)) details.push(`보충 주기 ${optimization.periodSeconds.toFixed(1)}초`);
   if (Number.isFinite(optimization?.jitterSeconds)) details.push(`변동 ${optimization.jitterSeconds.toFixed(1)}초`);
-  if (Number.isFinite(state.effectiveAutoStart ?? state.autoStart)) {
-    details.push(`배속 시작 ${(state.effectiveAutoStart ?? state.autoStart).toFixed(1)}초`);
+  if (Number.isFinite(state.effectiveAutoStart)) {
+    details.push(`배속 시작 ${state.effectiveAutoStart.toFixed(1)}초`);
   }
   elements.bufferStatus.textContent = details.join(" · ");
 }

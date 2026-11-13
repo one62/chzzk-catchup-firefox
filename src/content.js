@@ -133,7 +133,7 @@
       adState: adState(),
       ...autoSettings, autoActive: Boolean(autoSession), autoReason, lastAutoStop,
       ...playbackSettings, effectiveMargin: effectiveMargin(),
-      effectiveAutoStart: effectiveAutoSettings().autoStart,
+      effectiveAutoStart: effectiveAutoStart(),
       bufferOptimization: bufferOptimization(),
       connectionLabel: playbackPolicy.connectionLabel(stream?.selectedKind),
       autoStopBuffer: autoStopMargin(), startupEnabled,
@@ -262,7 +262,8 @@
     if (userRewound) { autoReason = autoMessages.rewind; return; }
     if (waitingForPlayback) { autoReason = autoMessages.waiting; return; }
     const decision = autoPolicy.startDecision(state,
-      { ...effectiveAutoSettings(), margin: effectiveMargin() }, now, autoBlockedUntil);
+      { ...autoSettings, margin: effectiveMargin() }, now, autoBlockedUntil,
+      effectiveAutoStart(optimization));
     if (!decision.start) {
       autoReason = decision.reason === "cooldown" && lastAutoStop?.message
         ? `${lastAutoStop.message} ${autoMessages.cooldown}`
@@ -271,10 +272,6 @@
     }
     const requiredBuffer = playbackSettings.bufferAutoEnabled
       ? optimization.requiredBuffer : effectiveMargin();
-    if (playbackSettings.bufferAutoEnabled && state.forwardBuffer < requiredBuffer + 0.5) {
-      autoReason = autoMessages["below-threshold"];
-      return;
-    }
     const rate = playbackSettings.bufferAutoEnabled
       ? autoPolicy.adaptiveRate(state.forwardBuffer, requiredBuffer, autoSettings.autoRate) : autoSettings.autoRate;
     autoSession = { video, originalRate: state.playbackRate, rate,
@@ -299,11 +296,9 @@
     const optimization = bufferOptimization(rate, true);
     return optimization.requiredBuffer ?? optimization.reserveSeconds;
   }
-  function effectiveAutoSettings() {
-    const target = autoStopMargin();
-    const normalizedTarget = Math.min(3, Math.max(0.2, target));
-    return autoPolicy.normalizeSettings({ ...autoSettings,
-      autoStart: Math.max(autoSettings.autoStart, Math.ceil((target + 0.5) * 10) / 10) }, normalizedTarget);
+  function effectiveAutoStart(optimization = bufferOptimization(autoSession?.rate ?? autoSettings.autoRate, true)) {
+    if (!playbackSettings.bufferAutoEnabled) return autoSettings.autoStart;
+    return optimization.playbackSafe ? Math.ceil((optimization.requiredBuffer + 0.5) * 10) / 10 : null;
   }
 
   function canCountBuffering() {

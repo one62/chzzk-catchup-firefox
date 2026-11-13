@@ -43,6 +43,9 @@
           </div>
         </section>
 
+        <button id="catch-up" type="button" class="button button-primary" disabled>즉시 따라잡기</button>
+        <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+
         <section class="settings-group" aria-label="연결 방식">
           <p class="section-label">현재 연결 <strong id="current-connection">—</strong></p>
           <div class="stream-buttons" role="group" aria-label="사용할 연결 방식">
@@ -55,14 +58,25 @@
 
         <div id="auto-form" class="auto-form">
           <label class="toggle-row" for="auto-enabled">
-            <span>자동 배속 따라잡기</span>
+            <span>배속 따라잡기</span>
             <input id="auto-enabled" name="autoEnabled" type="checkbox" checked>
+          </label>
+          <label class="toggle-row" for="buffer-auto-enabled">
+            <span>자동 최적화</span>
+            <input id="buffer-auto-enabled" name="bufferAutoEnabled" type="checkbox" checked>
           </label>
           <div class="auto-fields">
             <div>
               <label for="auto-start">시작 버퍼</label>
               <div class="number-field">
                 <input id="auto-start" name="autoStart" type="number" min="2" max="30" step="0.1" value="3" inputmode="decimal" required>
+                <span aria-hidden="true">초</span>
+              </div>
+            </div>
+            <div>
+              <label for="margin">남길 버퍼</label>
+              <div class="number-field">
+                <input id="margin" name="margin" type="number" min="0.2" max="3" step="0.1" value="0.6" inputmode="decimal" required>
                 <span aria-hidden="true">초</span>
               </div>
             </div>
@@ -76,29 +90,15 @@
               </select>
             </div>
           </div>
-        </div>
-
-        <div id="buffer-auto-form" class="settings-group">
-          <label class="toggle-row" for="buffer-auto-enabled">
-            <span>남길 버퍼 자동 최적화</span>
-            <input id="buffer-auto-enabled" name="bufferAutoEnabled" type="checkbox" checked>
-          </label>
-          <p class="help">유입 간격과 영상 분량을 학습해 남길 버퍼와 배속을 조절합니다.</p>
-          <label class="safety-label" for="buffer-safety-level">끊김 방지 안전 수준</label>
-          <select id="buffer-safety-level" name="bufferSafetyLevel" aria-describedby="buffer-safety-help">
-            <option value="high">상 · 안정성 우선</option>
-            <option value="medium" selected>중 · 균형</option>
-            <option value="low">하 · 짧은 지연 우선</option>
-          </select>
-          <p id="buffer-safety-help" class="help"></p>
-          <p id="buffer-status" class="help" role="status"></p>
-          <details class="buffer-statistics">
-            <summary>버퍼 유입 관측값</summary>
-            <p id="buffer-intervals" class="help"></p>
-            <p id="buffer-amounts" class="help"></p>
-            <p id="buffer-samples" class="help"></p>
-          </details>
-          <button id="reset-buffer" type="button" class="text-button" disabled>버퍼 학습 초기화</button>
+          <div class="buffer-auto-settings">
+            <select id="buffer-safety-level" name="bufferSafetyLevel" aria-label="끊김 방지 안전 수준">
+              <option value="high">상 · 안정성 우선</option>
+              <option value="medium" selected>중 · 균형</option>
+              <option value="low">하 · 짧은 지연 우선</option>
+            </select>
+            <p id="buffer-status" class="help" role="status"></p>
+            <button id="reset-buffer" type="button" class="text-button" disabled>버퍼 학습 초기화</button>
+          </div>
         </div>
 
         <div id="margin-form" class="margin-form">
@@ -106,18 +106,7 @@
             <span>입장 시 따라잡기</span>
             <input id="startup-enabled" name="startupEnabled" type="checkbox" checked>
           </label>
-          <label for="margin">남길 버퍼</label>
-          <div class="margin-controls">
-            <div class="number-field">
-              <input id="margin" name="margin" type="number" min="0.2" max="3" step="0.1" value="0.6" inputmode="decimal" aria-describedby="margin-help" required>
-              <span aria-hidden="true">초</span>
-            </div>
-          </div>
-          <p id="margin-help" class="help"></p>
         </div>
-
-        <button id="catch-up" type="button" class="button button-primary" disabled>즉시 따라잡기</button>
-        <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true"></p>
         </fieldset>
       </section>
 

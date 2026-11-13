@@ -1233,8 +1233,8 @@ test("automatic optimization learns replenishment without changing the stored ma
   assert.ok(app.video.buffered.end(0) - app.video.seekWrites[0] >= state.effectiveMargin - 0.001);
 });
 
-test("optimization waits for learning and then uses a fresh rate-aware target", async () => {
-  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true, autoRate: 2, autoStart: 2 });
+test("optimization waits for learning, then starts below the saved manual threshold", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, autoEnabled: true, autoRate: 2, autoStart: 30 });
   app.advance(250);
   assert.equal(app.video.playbackRate, 1);
   assert.equal((await app.send("catch-up")).ok, false);
@@ -1245,6 +1245,8 @@ test("optimization waits for learning and then uses a fresh rate-aware target", 
   assert.ok(app.video.rateWrites.every(rate => rate >= 1 && rate <= 2));
   assert.ok(state.autoStopBuffer > state.effectiveMargin);
   assert.ok(state.effectiveAutoStart >= state.autoStopBuffer + 0.5 - 0.001);
+  assert.ok(state.effectiveAutoStart < state.autoStart);
+  assert.equal(app.storage.autoStart, 30);
   app.video.player.markers = [new Element()];
   app.advance(250);
   assert.equal(app.video.playbackRate, 1);

@@ -67,9 +67,13 @@ h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.7px; }
 .auto-form { margin-top: 14px; padding: 12px; border: 1px solid #2c383d; border-radius: 10px; background: #192125; }
 .auto-form label { display: block; margin-bottom: 8px; color: #c6d3d8; font-size: 11px; }
 .auto-form .toggle-row, .margin-form .toggle-row, .settings-group .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; font-size: 12px; }
+.auto-form .toggle-row:first-child { margin-bottom: 12px; }
 .toggle-row input { width: 18px; height: 18px; margin: 0; accent-color: #79d6d0; }
-.auto-fields { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; }
+.auto-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .auto-fields > div { min-width: 0; }
+.auto-fields .number-field { padding-right: 6px; }
+.auto-fields input { padding-inline: 6px 2px; }
+.auto-fields select { padding-inline: 6px; }
 select { width: 100%; padding: 10px 9px; border: 1px solid #3b4a50; border-radius: 7px; background: #151d20; color: #e8f0f2; font: inherit; }
 select:focus-visible { outline: 2px solid #9cebe5; outline-offset: 2px; }
 select:disabled { color: #809198; }
@@ -88,6 +92,7 @@ button { font: inherit; cursor: pointer; }
 .button-secondary:hover:not(:disabled) { background: #314047; }
 .button-primary { width: 100%; padding: 13px 16px; background: #79d6d0; color: #112a2c; }
 .button-primary:hover:not(:disabled) { background: #96e5df; }
+#catch-up { margin-top: 10px; }
 button:focus-visible { outline: 2px solid #9cebe5; outline-offset: 3px; }
 button:disabled { cursor: default; opacity: 0.4; }
 .feedback { min-height: 0; margin: 10px 0 0; color: #a7bbc3; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
@@ -99,11 +104,7 @@ button:disabled { cursor: default; opacity: 0.4; }
 .stream-buttons { display: flex; gap: 6px; }
 .stream-buttons .button { flex: 1; padding: 8px 6px; font-size: 11px; }
 .stream-buttons [aria-pressed="true"] { border-color: #79d6d0; color: #92deda; }
-#buffer-auto-form .toggle-row { margin-bottom: 0; }
-#buffer-auto-form .safety-label { display: block; margin: 12px 0 8px; color: #c6d3d8; font-size: 12px; }
-.buffer-statistics { margin-top: 10px; color: #a7bbc3; font-size: 11px; }
-.buffer-statistics summary { cursor: pointer; }
-.buffer-statistics .help { margin-top: 4px; }
+.buffer-auto-settings { margin-top: 12px; }
 #reset-buffer { display: block; margin-top: 6px; }
 
 @media (max-width: 300px) {

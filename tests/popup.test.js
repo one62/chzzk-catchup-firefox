@@ -237,15 +237,19 @@ test("failed connection preference writes retain the previous selected mode", as
   assert.equal(app.writes.length, 0);
 });
 
-test("buffer optimization replaces guard controls directly below automatic catch-up", () => {
+test("catch-up action follows the metrics and related settings share one group", () => {
   const html = fs.readFileSync(path.join(__dirname, "../popup/popup.html"), "utf8");
   const automaticStart = html.indexOf('id="auto-form"');
-  const optimizerStart = html.indexOf('id="buffer-auto-form"');
-  assert.ok(automaticStart >= 0 && automaticStart < optimizerStart);
-  assert.ok(optimizerStart < html.indexOf('id="margin-form"'));
+  const optimizerStart = html.indexOf('class="buffer-auto-settings"');
+  const entryStart = html.indexOf('id="margin-form"');
+  assert.ok(automaticStart >= 0 && automaticStart < optimizerStart && optimizerStart < entryStart);
+  assert.match(html, /<section class="metrics"[\s\S]*?<\/section>\s*<button id="catch-up"/);
   assert.doesNotMatch(html, /type="submit"/);
   assert.doesNotMatch(html, /guard-(?:form|count|step|max|enabled)|반복 끊김 대응|버퍼 증가분/);
-  const optimization = html.slice(optimizerStart, html.indexOf('id="margin-form"'));
+  assert.match(html, /for="auto-enabled"[\s\S]*?<\/label>\s*<label class="toggle-row" for="buffer-auto-enabled">\s*<span>자동 최적화<\/span>/);
+  const fields = html.slice(html.indexOf('class="auto-fields"'), optimizerStart);
+  assert.match(fields, /id="auto-start"[\s\S]*id="margin"[\s\S]*id="auto-rate"/);
+  const optimization = html.slice(optimizerStart, entryStart);
   assert.match(optimization, /id="buffer-status"/);
   assert.match(optimization, /버퍼 학습 초기화/);
 });
@@ -259,10 +263,11 @@ test("optimization switches immediately and preserves the manual margin", async 
   assert.equal(app.stored.bufferAutoEnabled, true);
   assert.equal(app.elements.get("margin").disabled, true);
   const start = app.elements.get("auto-start");
+  assert.equal(start.disabled, true);
   start.value = "2.2";
   start.emit("change");
   await flush();
-  assert.equal(app.stored.autoStart, 2.2);
+  assert.equal(app.stored.autoStart, 3);
   toggle.checked = false;
   toggle.emit("change");
   await flush();
@@ -372,15 +377,9 @@ test("safety level persists independently, follows external changes and restores
   assert.equal(level.value, "low");
 });
 
-test("popup shows arrival statistics separately and does not misreport a capped reserve", async () => {
+test("popup reports the required reserve even when it exceeds the seek cap", async () => {
   const app = await harness({ bufferAutoEnabled: true, effectiveMargin: 3,
-    bufferOptimization: { phase: "tracking", safe: false, requiredBuffer: 4.5, sampleCount: 12,
-      intervalStats: { min: 1, mean: 2, max: 4 }, amountStats: { min: 0.5, mean: 2, max: 3 } } });
-  assert.match(app.elements.get("buffer-intervals").textContent, /최소 1\.00.*평균 2\.00.*최대 4\.00초/);
-  assert.match(app.elements.get("buffer-amounts").textContent, /최소 0\.50.*평균 2\.00.*최대 3\.00초/);
-  assert.match(app.elements.get("buffer-samples").textContent, /12회/);
+    bufferOptimization: { phase: "tracking", safe: false, requiredBuffer: 4.5 } });
   assert.match(app.elements.get("buffer-status").textContent, /4\.5초/);
   assert.equal(app.elements.get("catch-up").disabled, true);
-  app.changeStorage({ bufferAutoEnabled: false });
-  assert.match(app.elements.get("buffer-intervals").textContent, /학습 대기/);
 });

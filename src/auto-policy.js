@@ -55,7 +55,7 @@
     return null;
   }
 
-  function startDecision(state, settings, now, blockedUntil = 0) {
+  function startDecision(state, settings, now, blockedUntil = 0, adaptiveStart) {
     const margin = normalizedMargin(settings?.margin ?? state?.margin);
     const normalized = normalizeSettings(settings, margin);
     if (!normalized.autoEnabled) return { start: false, reason: "disabled" };
@@ -69,7 +69,7 @@
         Math.abs(state.playbackRate - 1) > RATE_TOLERANCE) {
       return { start: false, reason: "custom-rate" };
     }
-    if (state.forwardBuffer < normalized.autoStart) {
+    if (state.forwardBuffer < (adaptiveStart ?? normalized.autoStart)) {
       return { start: false, reason: "below-threshold" };
     }
     return { start: true, reason: "ready" };
