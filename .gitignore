@@ -1,3 +1,5 @@
 dist/
 node_modules/
 *.log
+/AGENTS.md
+/.agents/skills/
