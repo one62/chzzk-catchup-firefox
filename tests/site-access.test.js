@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
 const source = fs.readFileSync(path.join(__dirname, "../popup/site-access.js"), "utf8");
+const markup = fs.readFileSync(path.join(__dirname, "../popup/popup.html"), "utf8");
 
 async function harness(granted = false, request = async () => true) {
   const button = { disabled: false, textContent: "", addEventListener: (_, fn) => { button.click = fn; } };
@@ -52,6 +53,7 @@ test("existing access remains visible and revocation enables the grant button ag
   await app.flush();
   assert.equal(app.button.disabled, false);
   assert.equal(app.button.textContent, "치지직 접근 허용");
+  assert.match(app.status.textContent, /사이트 접근을 허용/);
 });
 
 test("denied or failed access requests allow retry and show only a concise result", async () => {
@@ -62,7 +64,20 @@ test("denied or failed access requests allow retry and show only a concise resul
     assert.equal(app.button.disabled, false);
     assert.match(app.status.textContent, /허용되지|요청 실패/);
     assert.doesNotMatch(app.status.textContent, /private/);
+    app.setGranted(true);
+    app.events.added();
+    await app.flush();
+    assert.match(app.button.textContent, /허용됨/);
+    assert.equal(app.status.textContent, "");
   }
+});
+
+test("site access is reachable independently of the feature fieldsets", () => {
+  const accessSection = markup.match(/<section class="site-access"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+  assert.match(accessSection, /id="grant-chzzk-access"/);
+  assert.match(accessSection, /id="site-access-status"/);
+  assert.doesNotMatch(markup.match(/<fieldset id="clip-body"[^>]*>([\s\S]*?)<\/fieldset>/)[1],
+    /grant-chzzk-access|site-access-status/);
 });
 
 test("an unresolved permission prompt stays pending without a second request", async () => {

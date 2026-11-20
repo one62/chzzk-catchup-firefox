@@ -72,7 +72,8 @@ async function harness(overrides = {}, options = {}) {
         local: {
           get: async () => {
             if (options.failRead) throw new Error("storage unavailable");
-            return { ...stored };
+            const snapshot = { ...stored };
+            return options.readSettings ? options.readSettings(snapshot) : snapshot;
           },
           set: async values => {
             if (rejectAutoSave) throw new Error("storage unavailable");
@@ -82,12 +83,16 @@ async function harness(overrides = {}, options = {}) {
         },
         onChanged: { addListener: listener => { storageListener = listener; } },
       },
+      permissions: { contains: async () => options.granted !== false },
       tabs: {
-        query: async () => [{ id: 7, url: options.url ?? "https://chzzk.naver.com/live/channel-id" }],
+        query: async () => [{
+          id: 7, url: Object.hasOwn(options, "url") ? options.url : "https://chzzk.naver.com/live/channel-id",
+        }],
         sendMessage: async (_tabId, request) => {
           calls.push(request);
           if (options.disconnected) throw new Error("no content script");
-          return { ok: true, status: { ...status } };
+          const response = { ok: true, status: { ...status } };
+          return options.readStatus ? options.readStatus(request, response) : response;
         },
       },
     },
@@ -211,6 +216,66 @@ test("unreadable settings cannot be overwritten with defaults", async () => {
   }
   await flush();
   assert.equal(app.writes.length, 0);
+  assert.equal(app.calls.length, 0);
+  assert.match(app.elements.get("feedback").textContent, /다시 시도 중/);
+});
+
+test("status waits for current settings and refreshes immediately on re-enable", async () => {
+  let finishRead;
+  const app = await harness({}, {
+    readSettings: snapshot => new Promise(resolve => { finishRead = () => resolve(snapshot); }),
+  });
+  assert.equal(app.calls.length, 0);
+  app.changeStorage({ catchupEnabled: false, autoRate: 2 });
+  finishRead();
+  await flush();
+  assert.equal(app.calls.length, 0);
+  assert.equal(app.elements.get("state-badge").textContent, "따라잡기 꺼짐");
+  assert.equal(app.elements.get("auto-rate").value, "2");
+  app.changeStorage({ catchupEnabled: true });
+  await flush();
+  assert.equal(app.calls.length, 1);
+  assert.equal(app.elements.get("state-badge").textContent, "LIVE");
+});
+
+test("an older status response cannot overwrite a newer enable cycle", async () => {
+  let finishStatus;
+  const app = await harness({}, {
+    readStatus: (request, response) => !finishStatus
+      ? new Promise(resolve => { finishStatus = () => resolve(response); }) : response,
+  });
+  assert.equal(app.calls.length, 1);
+  app.changeStorage({ catchupEnabled: false });
+  app.status.playerLatency = 5;
+  app.changeStorage({ catchupEnabled: true });
+  await flush();
+  assert.equal(app.calls.length, 2);
+  assert.equal(app.elements.get("player-latency").textContent, "5.00 초");
+  finishStatus();
+  await flush();
+  assert.equal(app.elements.get("player-latency").textContent, "5.00 초");
+});
+
+test("popup retries a failed initial settings read before polling status", async () => {
+  let reads = 0;
+  const app = await harness({}, {
+    readSettings: snapshot => {
+      if (++reads === 1) throw new Error("storage unavailable");
+      return snapshot;
+    },
+  });
+  assert.equal(app.calls.length, 0);
+  await app.refresh();
+  assert.equal(app.calls.length, 1);
+  assert.equal(app.elements.get("state-badge").textContent, "LIVE");
+});
+
+test("status can distinguish absent site permission from a granted non-CHZZK tab", async () => {
+  const noAccess = await harness({}, { url: undefined, granted: false });
+  assert.match(noAccess.elements.get("feedback").textContent, /치지직 접근을 허용/);
+  assert.equal(noAccess.calls.length, 0);
+  const wrongTab = await harness({}, { url: undefined, granted: true });
+  assert.match(wrongTab.elements.get("feedback").textContent, /라이브 탭/);
 });
 
 test("transport preference buttons work outside CHZZK and keep actual connection separate", async () => {

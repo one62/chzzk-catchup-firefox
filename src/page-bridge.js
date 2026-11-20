@@ -10,15 +10,16 @@
     if (event.source !== window || event.origin !== location.origin ||
         data?.namespace !== "chzzk-catchup-stream-request" ||
         typeof data.token !== "string" || data.token.length > 100 ||
-        !Number.isSafeInteger(data.requestId) || !Number.isInteger(data.videoIndex) ||
+        !Number.isSafeInteger(data.requestId) || !Number.isInteger(data.videoIndex) || data.videoIndex < 0 ||
         !["inspect", "switch"].includes(data.action) ||
         (data.action === "switch" && !["main", "low-latency"].includes(data.kind))) return;
     let result = { ok: false, reason: "not-live" };
     try {
       if (/^\/live\/[^/]+\/?$/.test(location.pathname)) {
         const video = document.querySelectorAll("video")[data.videoIndex];
-        result = data.action === "inspect" ? { ok: true, stream: streams.inspect(video) }
-          : await streams.change(video, data.kind);
+        if (!video) result = { ok: false, reason: "player-unavailable" };
+        else if (data.action === "inspect") result = { ok: true, stream: streams.inspect(video) };
+        else result = await streams.change(video, data.kind);
       }
     } catch { result = { ok: false, reason: "player-unavailable" }; }
     window.postMessage({ namespace: "chzzk-catchup-stream-response", token: data.token,

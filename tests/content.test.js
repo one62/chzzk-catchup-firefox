@@ -100,7 +100,7 @@ function makeVideo(overrides = {}) {
   return element;
 }
 
-async function harness(overrides = {}, savedSettings = { autoEnabled: false }) {
+async function harness(overrides = {}, savedSettings = { autoEnabled: false }, options = {}) {
   let now = Date.parse("2026-10-14T00:00:00Z");
   const initialTime = now;
   let wallOffset = 0;
@@ -198,7 +198,10 @@ async function harness(overrides = {}, savedSettings = { autoEnabled: false }) {
       },
       storage: {
         local: {
-          get: (defaults) => Promise.resolve({ ...defaults, ...storage }),
+          get: (defaults) => {
+            const snapshot = { ...defaults, ...storage };
+            return options.readSettings ? options.readSettings(snapshot) : Promise.resolve(snapshot);
+          },
         },
         onChanged: { addListener: (listener) => { storageListener = listener; } },
       },
@@ -211,7 +214,7 @@ async function harness(overrides = {}, savedSettings = { autoEnabled: false }) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${name}.js`), "utf8"), context);
   }
   vm.runInContext(contentSource, context, { filename: "src/content.js" });
-  await Promise.resolve();
+  await new Promise(setImmediate);
   return {
     video: element, document, location, window, postedMessages, advance, storage, labelCalls, indicatorCalls,
     setStream(value) { streamSnapshot = { ...streamSnapshot, ...value }; },
@@ -246,6 +249,47 @@ async function harness(overrides = {}, savedSettings = { autoEnabled: false }) {
     send(type, details = {}) { return messageListener({ namespace: "chzzk-catchup", type, ...details }); },
   };
 }
+
+test("initial settings preserve newer storage changes across all playback keys", async () => {
+  let completeRead;
+  const app = await harness({}, { startupEnabled: true }, {
+    readSettings: snapshot => new Promise(resolve => { completeRead = () => resolve(snapshot); }),
+  });
+  assert.match((await app.send("get-status")).error, /불러오는 중/);
+  app.changeStorage({
+    margin: 2, autoRate: 2, streamMode: "hls", startupEnabled: false,
+    bufferAutoEnabled: false, bufferSafetyLevel: "high",
+  });
+  completeRead();
+  await new Promise(setImmediate);
+  const { status } = await app.send("get-status");
+  assert.equal(status.margin, 2);
+  assert.equal(status.autoRate, 2);
+  assert.equal(status.streamMode, "hls");
+  assert.equal(status.startupEnabled, false);
+  assert.equal(status.bufferAutoEnabled, false);
+  assert.equal(status.bufferSafetyLevel, "high");
+});
+
+test("failed settings reads retry without activating an explicitly disabled controller", async () => {
+  let reads = 0;
+  const app = await harness({}, { catchupEnabled: false }, {
+    readSettings: snapshot => ++reads === 1
+      ? Promise.reject(new Error("storage unavailable")) : Promise.resolve(snapshot),
+  });
+  assert.match((await app.send("catch-up")).error, /읽지 못했어요/);
+  app.advance(4999);
+  assert.equal(reads, 1);
+  app.advance(1);
+  await new Promise(setImmediate);
+  assert.equal(reads, 2);
+  assert.equal((await app.send("get-status")).error, "따라잡기 꺼짐");
+  assert.equal(app.postedMessages.length, 0);
+  assert.equal(app.video.rateWrites.length, 0);
+  assert.equal(app.video.seekWrites.length, 0);
+  app.changeStorage({ catchupEnabled: true });
+  assert.equal((await app.send("get-status")).ok, true);
+});
 
 test("LL-HLS automatically takes priority without popup actions then enables the same extension speed policy", async () => {
   const app = await harness({}, {});
@@ -792,6 +836,29 @@ test("SPA channel changes and replacement players release previous speed ownersh
   channel.location.pathname = "/live/other-channel";
   channel.advance(250);
   assert.equal(channel.video.playbackRate, 1.5);
+});
+
+test("a video removed after selection does not send an invalid bridge request", async () => {
+  const app = await harness();
+  app.postedMessages.length = 0;
+  function detachAfterSelection() {
+    let available = true;
+    app.document.querySelectorAll = selector => {
+      if (selector !== "video" || !available) return [];
+      available = false;
+      return [app.video];
+    };
+  }
+  detachAfterSelection();
+  app.window.emit("pageshow");
+  detachAfterSelection();
+  await app.send("get-status");
+  assert.equal(app.postedMessages.length, 0);
+
+  app.document.querySelectorAll = selector => selector === "video" ? [app.video] : [];
+  app.advance(1250);
+  assert.ok(app.postedMessages.some(message => message.action === "inspect"));
+  assert.ok(app.postedMessages.every(message => message.videoIndex === 0));
 });
 
 test("synced setting changes release owned speed and adopt the new margin-safe start threshold", async () => {
@@ -1456,6 +1523,43 @@ test("automatic entry catch-up waits for a stable buffer pattern and still runs 
   assert.equal(app.video.seekWrites.length, 1);
   assert.equal(app.video.playbackRate, 1);
   assert.equal(app.video.playCalls, 0);
+});
+
+test("a deferred entry seek gives way to safe speed-up only when it starts", async () => {
+  const app = await harness({ buffered: ranges([[0, 150]]) }, {
+    startupEnabled: true, bufferAutoEnabled: true, autoEnabled: false, bufferSafetyLevel: "high",
+  });
+  await replenish(app, 2);
+  for (let i = 0; i < 3; i++) {
+    await buffering(app, 500);
+    await replenish(app, 1);
+  }
+  await replenish(app, 12);
+  const waiting = (await app.send("get-status")).status;
+  assert.equal(waiting.bufferOptimization.safe, false);
+  assert.equal(waiting.bufferOptimization.playbackSafe, true);
+  assert.ok(waiting.forwardBuffer > waiting.effectiveAutoStart);
+  assert.equal(waiting.startupPending, true);
+  assert.equal(app.video.playbackRate, 1);
+
+  app.changeStorage({ autoEnabled: true });
+  await replenish(app, 1);
+  assert.ok(app.video.playbackRate > 1);
+  assert.equal((await app.send("get-status")).status.startupPending, false);
+  app.changeStorage({ autoEnabled: false, bufferSafetyLevel: "medium" });
+  await replenish(app, 12);
+  assert.equal((await app.send("get-status")).status.bufferOptimization.safe, true);
+  assert.deepEqual(app.video.seekWrites, []);
+});
+
+test("automatic stop status includes the playback safety floor for short part intervals", async () => {
+  const app = await harness({}, { bufferAutoEnabled: true, bufferSafetyLevel: "low", autoRate: 1.1 });
+  await replenish(app, 5, 0.25);
+  app.advance(425);
+  const state = (await app.send("get-status")).status;
+  assert.equal(state.autoActive, true);
+  assert.ok(state.bufferOptimization.requiredBuffer < 0.6);
+  assert.equal(state.autoStopBuffer, 0.6);
 });
 
 test("legacy off preference and explicit automatic choice survive live storage updates", async () => {

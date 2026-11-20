@@ -36,8 +36,8 @@
     };
   }
 
-  function stopBuffer(margin) {
-    return Math.max(normalizedMargin(margin), 0.6);
+  function stopBuffer(margin, requiredBuffer = 0) {
+    return Math.max(normalizedMargin(margin), DEFAULT_MARGIN, requiredBuffer);
   }
 
   function unavailableReason(state) {
@@ -86,11 +86,8 @@
         now < session.startedAt || now < session.lastProgressAt) {
       return { stop: true, reason: "invalid-session" };
     }
-    if (state.forwardBuffer <= requiredBuffer) {
-      return { stop: true, reason: "target-reached" };
-    }
-    if (state.forwardBuffer <= stopBuffer(session.margin)) {
-      return { stop: true, reason: "low-buffer" };
+    if (state.forwardBuffer <= stopBuffer(session.margin, requiredBuffer)) {
+      return { stop: true, reason: state.forwardBuffer <= requiredBuffer ? "target-reached" : "low-buffer" };
     }
     if (now - session.lastProgressAt >= PROGRESS_TIMEOUT_MS) {
       return { stop: true, reason: "no-progress" };

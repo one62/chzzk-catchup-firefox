@@ -10,7 +10,7 @@ test("fold and enable switches are independent and restored in a new popup", asy
   const saved = {};
   const api = {
     storage: { local: { get: async defaults => ({ ...defaults, ...saved }),
-      set: async values => Object.assign(saved, values) } },
+      set: async values => Object.assign(saved, values) }, onChanged: { addListener() {} } },
     runtime: { sendMessage: async ({ enabled }) => { saved.clipEnabled = enabled; } },
   };
   async function open() {
@@ -19,7 +19,7 @@ test("fold and enable switches are independent and restored in a new popup", asy
       return elements[id] ??= { firstElementChild: {}, addEventListener(type, fn) { this[type] = fn; },
         setAttribute(name, value) { this[name] = value; } };
     } };
-    vm.runInNewContext(source, { browser: api, document });
+    vm.runInNewContext(source, { browser: api, document, window: { addEventListener() {} } });
     await Promise.resolve();
     return elements;
   }
@@ -48,4 +48,38 @@ test("fold and enable switches are independent and restored in a new popup", asy
   await new Promise(setImmediate);
   assert.equal(saved.chatLayoutWidth, 960);
   assert.equal(ui["chat-width"].value, 960);
+});
+
+test("section settings retry and preserve changes newer than the initial snapshot", async () => {
+  const elements = {};
+  const document = { getElementById(id) {
+    return elements[id] ??= { addEventListener() {}, setAttribute(name, value) { this[name] = value; } };
+  } };
+  let reads = 0;
+  let retry;
+  let resolveRead;
+  let listener;
+  const api = { storage: {
+    local: { get: defaults => ++reads === 1 ? Promise.reject(new Error("storage unavailable"))
+      : new Promise(resolve => { resolveRead = () => resolve(defaults); }) },
+    onChanged: { addListener(callback) { listener = callback; } },
+  } };
+  vm.runInNewContext(source, {
+    browser: api, document, window: { addEventListener() {} },
+    setTimeout(callback) { retry = callback; },
+  });
+  await new Promise(setImmediate);
+  assert.equal(elements["catchup-enabled"].disabled, true);
+  assert.match(elements["feature-note"].textContent, /다시 시도/);
+  retry();
+  listener({ catchupEnabled: { newValue: false }, chatLayoutWidth: { newValue: 800 } }, "local");
+  resolveRead();
+  await new Promise(setImmediate);
+  assert.equal(elements["catchup-enabled"].disabled, false);
+  assert.equal(elements["catchup-enabled"].checked, false);
+  assert.equal(elements["catchup-body"].disabled, true);
+  assert.equal(elements["chat-width"].value, 800);
+  assert.equal(elements["feature-note"].textContent, "");
+  listener({ catchupEnabled: { newValue: true } }, "local");
+  assert.equal(elements["catchup-body"].disabled, false);
 });

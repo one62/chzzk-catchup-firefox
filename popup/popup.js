@@ -5,6 +5,7 @@ const namespace = "chzzk-catchup";
 const media = globalThis.ChzzkCatchupMedia;
 const autoPolicy = globalThis.ChzzkCatchupAutoPolicy;
 const playbackPolicy = globalThis.ChzzkCatchupPlaybackPolicy;
+const siteAccess = { origins: ["https://chzzk.naver.com/*"] };
 const settingKeys = ["catchupEnabled", "margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
   "bufferGuardEnabled", ...Object.keys(playbackPolicy.normalize())];
 const elements = {
@@ -35,10 +36,13 @@ let currentStatus = null;
 let currentTabId = null;
 let rawSettings = {};
 let savedSettings = null;
+let loadingSettings = false;
+let settingsReadFailed = false;
+let pendingSettingsChanges = {};
 let settingWrites = Promise.resolve();
 let busy = false;
-let refreshing = false;
 let requestGeneration = 0;
+let refreshingGeneration = null;
 let feedbackUntil = 0;
 
 function seconds(value) {
@@ -149,23 +153,26 @@ async function getActiveTab() {
   try {
     url = new URL(tab.url);
   } catch {
+    const granted = await api.permissions?.contains(siteAccess).catch(() => null);
+    if (granted === false) throw new Error("위에서 치지직 접근을 허용해 주세요.");
     throw new Error("라이브 탭에서 재생 상태 확인");
   }
   if (url.origin !== "https://chzzk.naver.com") {
     throw new Error("라이브 탭에서 재생 상태 확인");
   }
+  return tab;
+}
+
+async function send(type, generation) {
+  const tab = await getActiveTab();
+  if (generation !== requestGeneration) return null;
   if (currentTabId !== tab.id) {
     currentTabId = tab.id;
     currentStatus = null;
   }
-  return tab;
-}
-
-async function send(type, extra = {}) {
-  const tab = await getActiveTab();
   let response;
   try {
-    response = await api.tabs.sendMessage(tab.id, { namespace, type, ...extra });
+    response = await api.tabs.sendMessage(tab.id, { namespace, type });
   } catch {
     throw new Error("치지직 탭을 새로고침한 뒤 다시 열어 주세요.");
   }
@@ -174,37 +181,42 @@ async function send(type, extra = {}) {
 }
 
 async function refreshStatus() {
-  if (rawSettings.catchupEnabled === false || busy || refreshing) return;
-  refreshing = true;
+  if (!savedSettings || rawSettings.catchupEnabled === false || busy ||
+      refreshingGeneration === requestGeneration) return;
   const generation = requestGeneration;
+  refreshingGeneration = generation;
   try {
-    const response = await send("get-status");
+    const response = await send("get-status", generation);
     if (generation !== requestGeneration) return;
     if (!response.status) throw new Error("재생 상태를 확인할 수 없어요.");
     renderStatus(response.status);
   } catch (error) {
     if (generation === requestGeneration) renderUnavailable(error.message);
   } finally {
-    refreshing = false;
+    if (refreshingGeneration === generation) refreshingGeneration = null;
   }
 }
 
 async function performAction(action) {
   if (busy) return;
   busy = true;
-  requestGeneration += 1;
+  const generation = ++requestGeneration;
   updateControls();
   try {
-    await action();
+    await action(generation);
   } catch (error) {
-    showFeedback(error.message || "요청을 처리하지 못했어요.", true, 6000);
+    if (generation === requestGeneration) {
+      showFeedback(error.message || "요청을 처리하지 못했어요.", true, 6000);
+    }
   } finally {
     busy = false;
     updateControls();
+    if (generation !== requestGeneration) void refreshStatus();
   }
 }
 
 function applySettings(raw) {
+  const shouldRefresh = !savedSettings || rawSettings.catchupEnabled === false;
   rawSettings = { ...raw };
   const margin = media.normalizeMargin(raw.margin);
   const playback = playbackPolicy.normalize(raw);
@@ -213,8 +225,12 @@ function applySettings(raw) {
   renderSettings();
   if (raw.catchupEnabled === false) {
     requestGeneration++;
+    showFeedback("");
     renderUnavailable("");
     elements.badge.textContent = "따라잡기 꺼짐";
+  } else if (shouldRefresh) {
+    elements.badge.textContent = "확인 중";
+    void refreshStatus();
   }
 }
 
@@ -284,11 +300,11 @@ async function saveSettings(values) {
 
 api.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !settingKeys.some(key => changes[key])) return;
-  const next = { ...rawSettings };
+  const next = savedSettings ? { ...rawSettings } : pendingSettingsChanges;
   for (const key of settingKeys) {
     if (changes[key]) next[key] = changes[key].newValue;
   }
-  applySettings(next);
+  if (savedSettings) applySettings(next);
 });
 
 function applyOption(key, read, validate = () => "") {
@@ -342,9 +358,10 @@ applyOption("margin", element => element.valueAsNumber, value => {
 
 elements.catchUp.addEventListener("click", () => {
   if (elements.catchUp.disabled) return;
-  void performAction(async () => {
+  void performAction(async generation => {
     showFeedback("받아 둔 영상의 끝 가까이 이동하고 있어요.");
-    const response = await send("catch-up");
+    const response = await send("catch-up", generation);
+    if (generation !== requestGeneration) return;
     if (response.status) renderStatus(response.status);
     showFeedback(response.status?.lastResult?.message || "따라잡기를 실행했어요.", false, 4000);
   });
@@ -353,8 +370,9 @@ elements.catchUp.addEventListener("click", () => {
 for (const [button, mode] of [[elements.streamAuto, "auto"], [elements.streamHls, "hls"], [elements.streamLlhls, "llhls"]]) {
   button.addEventListener("click", () => {
     if (button.disabled) return;
-    void performAction(async () => {
+    void performAction(async generation => {
       await saveSettings({ streamMode: mode });
+      if (generation !== requestGeneration) return;
       showFeedback(`연결 방식을 ${mode === "auto" ? "자동" : mode === "hls" ? "HLS" : "LL-HLS"}로 저장했어요.`, false, 4000);
     });
   });
@@ -362,17 +380,34 @@ for (const [button, mode] of [[elements.streamAuto, "auto"], [elements.streamHls
 
 elements.resetBuffer.addEventListener("click", () => {
   if (elements.resetBuffer.disabled) return;
-  void performAction(async () => {
-    const response = await send("reset-buffer");
+  void performAction(async generation => {
+    const response = await send("reset-buffer", generation);
+    if (generation !== requestGeneration) return;
     if (response.status) renderStatus(response.status);
     showFeedback("현재 방송의 버퍼 보충 주기 학습을 초기화했어요.", false, 4000);
   });
 });
 
+async function loadSettings() {
+  if (loadingSettings) return;
+  loadingSettings = true;
+  pendingSettingsChanges = {};
+  try {
+    const saved = await api.storage.local.get(settingKeys);
+    if (settingsReadFailed) showFeedback("");
+    applySettings({ ...saved, ...pendingSettingsChanges });
+  } catch {
+    settingsReadFailed = true;
+    showFeedback("설정을 읽지 못했어요. 다시 시도 중입니다.", true);
+  } finally {
+    loadingSettings = false;
+  }
+}
+
 updateControls();
-void api.storage.local.get(settingKeys).then(applySettings).catch(() => {
-  showFeedback("설정을 읽지 못했어요. 확장 팝업을 다시 열어 주세요.", true, 6000);
-});
-void refreshStatus();
-const refreshTimer = setInterval(() => void refreshStatus(), 1000);
+void loadSettings();
+const refreshTimer = setInterval(() => {
+  if (savedSettings) void refreshStatus();
+  else void loadSettings();
+}, 1000);
 window.addEventListener("pagehide", () => clearInterval(refreshTimer), { once: true });

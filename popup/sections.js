@@ -2,8 +2,20 @@
   const api = globalThis.browser || globalThis.chrome;
   const note = document.getElementById("feature-note");
   const width = document.getElementById("chat-width");
+  const defaults = { chatLayoutWidth: 1000 };
+  const apply = new Map();
+  const readError = "섹션 설정을 읽지 못했습니다. 다시 시도 중입니다.";
   let savedWidth = 1000;
   let widthWrites = Promise.resolve();
+  let ready = false;
+  let pendingChanges = {};
+  let retryTimer;
+
+  apply.set("chatLayoutWidth", value => {
+    savedWidth = value ?? defaults.chatLayoutWidth;
+    if (document.activeElement !== width) width.value = savedWidth;
+  });
+
   for (const key of ["catchup", "clip", "chatLayout"]) {
     const fold = document.getElementById(key + "-fold");
     const toggle = document.getElementById(key + "-enabled");
@@ -18,17 +30,11 @@
       toggle.checked = enabled;
       body.disabled = !enabled;
     }
-    fold.disabled = true;
-    const defaults = { [foldedKey]: false, [enabledKey]: key !== "chatLayout" };
-    if (key === "chatLayout") defaults.chatLayoutWidth = 1000;
-    api.storage.local.get(defaults).then(saved => {
-      if (key === "chatLayout") {
-        width.value = savedWidth = saved.chatLayoutWidth;
-      }
-      showFold(saved[foldedKey]);
-      showEnabled(saved[enabledKey]);
-      fold.disabled = toggle.disabled = false;
-    }).catch(() => { note.textContent = "섹션 설정을 읽지 못했습니다."; });
+    fold.disabled = toggle.disabled = true;
+    defaults[foldedKey] = false;
+    defaults[enabledKey] = key !== "chatLayout";
+    apply.set(foldedKey, value => showFold(value ?? defaults[foldedKey]));
+    apply.set(enabledKey, value => showEnabled(value ?? defaults[enabledKey]));
     fold.addEventListener("click", async () => {
       fold.disabled = true;
       try {
@@ -56,10 +62,36 @@
       } finally { toggle.disabled = false; }
     });
   }
+  api.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    for (const [key, render] of apply) {
+      if (!changes[key]) continue;
+      if (ready) render(changes[key].newValue);
+      else pendingChanges[key] = changes[key].newValue;
+    }
+  });
+  function loadSections() {
+    pendingChanges = {};
+    api.storage.local.get(defaults).then(saved => {
+      const settings = { ...saved, ...pendingChanges };
+      for (const [key, render] of apply) render(settings[key]);
+      for (const key of ["catchup", "clip", "chatLayout"]) {
+        document.getElementById(key + "-fold").disabled = false;
+        document.getElementById(key + "-enabled").disabled = false;
+      }
+      if (note.textContent === readError) note.textContent = "";
+      ready = true;
+    }).catch(() => {
+      note.textContent = readError;
+      retryTimer = setTimeout(loadSections, 1000);
+    });
+  }
+
   width.addEventListener("keydown", event => {
     if (event.key === "Enter") width.blur();
   });
   width.addEventListener("change", () => {
+    if (!ready) return;
     const value = width.valueAsNumber;
     const valid = Number.isSafeInteger(value) && value >= 1;
     widthWrites = widthWrites.then(async () => {
@@ -73,4 +105,6 @@
         ? "채팅창 배치 기준 너비를 저장하지 못했습니다." : error.message;
     });
   });
+  void loadSections();
+  window.addEventListener("pagehide", () => clearTimeout(retryTimer), { once: true });
 })();

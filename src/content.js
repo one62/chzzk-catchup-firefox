@@ -27,8 +27,15 @@
   let displayedMetrics = null;
   let autoSettings = autoPolicy.normalizeSettings({}, margin);
   let settingsReady = false;
+  let settingsRetryAt = Infinity;
   let catchupEnabled = false;
-  let enabledChanged = false;
+  const settingsDefaults = {
+    catchupEnabled: true, margin: 0.6, startupEnabled: true, autoEnabled: true, autoStart: 3, autoRate: 1.5,
+    streamMode: "auto", bufferAutoEnabled: null, bufferGuardEnabled: null, bufferSafetyLevel: "medium",
+  };
+  const settingsKeys = Object.keys(settingsDefaults);
+  const playbackKeys = settingsKeys.filter(key => key !== "catchupEnabled");
+  let pendingSettingsChanges = {};
   let startupEnabled = true;
   let startupPending = true;
   let startupPlayback = null;
@@ -209,13 +216,13 @@
     if (!settingsReady) return;
     if (canPreferStream()) { void preferStream(); return; }
     if (stepStartup()) return;
-    const state = status();
-    const now = monotonicNow();
     const optimization = bufferOptimization(autoSession?.rate ?? autoSettings.autoRate, true);
     if (playbackSettings.bufferAutoEnabled && !optimization.playbackSafe) {
       stopAuto(optimization.phase === "learning" ? "buffer-learning" : "buffer-unstable");
       return;
     }
+    const state = status();
+    const now = monotonicNow();
     if (autoSession) {
       if (!sameRate(state.playbackRate, autoSession.rate)) {
         stopAuto("custom-rate");
@@ -281,6 +288,8 @@
     try {
       video.playbackRate = autoSession.rate;
       if (!sameRate(video.playbackRate, autoSession.rate)) { stopAuto("rate-failed"); return; }
+      // A successful speed-up takes the place of a deferred entry seek.
+      if (startupEnabled) startupPending = false;
       autoReason = null;
     } catch {
       stopAuto("rate-failed");
@@ -292,9 +301,9 @@
   }
   function effectiveMargin() { return bufferOptimization().margin; }
   function autoStopMargin(rate = autoSession?.rate ?? autoSettings.autoRate) {
-    if (!playbackSettings.bufferAutoEnabled) return autoPolicy.stopBuffer(effectiveMargin());
     const optimization = bufferOptimization(rate, true);
-    return optimization.requiredBuffer ?? optimization.reserveSeconds;
+    const requiredBuffer = optimization.requiredBuffer ?? optimization.reserveSeconds;
+    return autoPolicy.stopBuffer(Math.min(3, requiredBuffer), requiredBuffer);
   }
   function effectiveAutoStart(optimization = bufferOptimization(autoSession?.rate ?? autoSettings.autoRate, true)) {
     if (!playbackSettings.bufferAutoEnabled) return autoSettings.autoStart;
@@ -335,10 +344,10 @@
   function stepStartup() {
     if (!startupEnabled || !startupPending) return false;
     if (playbackSettings.bufferAutoEnabled && !bufferOptimization().safe) {
-      const phase = bufferOptimization().phase;
-      autoReason = autoMessages[phase === "learning" ? "buffer-learning" : "buffer-unstable"];
+      // The seek cap only governs position changes. Let the speed policy
+      // check its own required buffer while the entry seek stays pending.
       startupPlayback = null;
-      return true;
+      return false;
     }
     // Let the chosen stream actually play before moving. Reset readiness on
     // interruptions/source changes, but never re-arm a completed entry seek.
@@ -490,13 +499,17 @@
 
   function readLatency() {
     if (!isLive() || !video || video.paused) return;
+    const videoIndex = [...document.querySelectorAll("video")].indexOf(video);
+    if (videoIndex < 0) return;
     requestId += 1;
     window.postMessage({ namespace: "chzzk-catchup-latency-request", token,
-      requestId, videoIndex: [...document.querySelectorAll("video")].indexOf(video) }, location.origin);
+      requestId, videoIndex }, location.origin);
   }
 
   function requestStream(action, kind) {
     const selectedVideo = video;
+    const videoIndex = [...document.querySelectorAll("video")].indexOf(selectedVideo);
+    if (videoIndex < 0) return Promise.resolve({ ok: false, reason: "player-unavailable" });
     const id = ++streamRequestId;
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
@@ -505,7 +518,7 @@
       }, 15000);
       streamRequests.set(id, { selectedVideo, path: location.pathname, epoch: streamEpoch, timeout, resolve });
       window.postMessage({ namespace: "chzzk-catchup-stream-request", token, requestId: id,
-        action, kind, videoIndex: [...document.querySelectorAll("video")].indexOf(video) }, location.origin);
+        action, kind, videoIndex }, location.origin);
     });
   }
 
@@ -683,6 +696,8 @@
 
   browser.runtime.onMessage.addListener((message) => {
     if (message?.namespace !== "chzzk-catchup") return undefined;
+    if (!settingsReady) return Promise.resolve({ ok: false, error: Number.isFinite(settingsRetryAt)
+      ? "설정을 읽지 못했어요. 다시 시도 중입니다." : "설정을 불러오는 중입니다." });
     if (!catchupEnabled) return Promise.resolve({ ok: false, error: "따라잡기 꺼짐" });
     refreshVideo();
     if (message.type === "catch-up") return Promise.resolve(catchUp());
@@ -700,8 +715,14 @@
   });
 
   browser.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && changes.catchupEnabled) {
-      enabledChanged = true;
+    if (area !== "local") return;
+    if (!settingsReady) {
+      for (const key of settingsKeys) {
+        if (changes[key]) pendingSettingsChanges[key] = changes[key].newValue;
+      }
+      return;
+    }
+    if (changes.catchupEnabled) {
       catchupEnabled = changes.catchupEnabled.newValue !== false;
       if (!catchupEnabled) {
         stopAuto("settings-changed");
@@ -711,14 +732,12 @@
       refreshVideo();
       render();
     }
-    if (area !== "local" || !["margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
-      ...Object.keys(playbackSettings), "bufferGuardEnabled"].some((key) => changes[key])) return;
+    if (!playbackKeys.some(key => changes[key])) return;
     stopAuto("settings-changed");
     if (changes.margin) margin = media.normalizeMargin(changes.margin.newValue);
     if (changes.startupEnabled) startupEnabled = changes.startupEnabled.newValue !== false;
     const nextPlayback = { ...playbackPreferences };
-    for (const key of ["margin", "startupEnabled", "autoEnabled", "autoStart", "autoRate",
-      ...Object.keys(playbackSettings), "bufferGuardEnabled"]) {
+    for (const key of playbackKeys) {
       if (changes[key]) nextPlayback[key] = changes[key].newValue;
     }
     playbackPreferences = nextPlayback;
@@ -732,7 +751,9 @@
   });
 
   const timer = setInterval(() => {
-    if (!catchupEnabled || pageSuspended) return;
+    if (pageSuspended) return;
+    if (!settingsReady && monotonicNow() >= settingsRetryAt) void loadSettings();
+    if (!catchupEnabled) return;
     refreshVideo();
     void inspectStream();
     readLatency();
@@ -778,9 +799,18 @@
     (name === "resize" || name === "scroll" ? window : document)
       .addEventListener(name, render, { passive: true });
   }
-  browser.storage.local.get({ catchupEnabled: true, margin: 0.6, startupEnabled: true, autoEnabled: true, autoStart: 3, autoRate: 1.5,
-    streamMode: "auto", bufferAutoEnabled: null, bufferGuardEnabled: null, bufferSafetyLevel: "medium" }).then((saved) => {
-    if (!enabledChanged) catchupEnabled = saved.catchupEnabled !== false;
+  async function loadSettings() {
+    settingsRetryAt = Infinity;
+    pendingSettingsChanges = {};
+    let saved;
+    try {
+      saved = await browser.storage.local.get(settingsDefaults);
+    } catch {
+      settingsRetryAt = monotonicNow() + 5000;
+      return;
+    }
+    saved = { ...saved, ...pendingSettingsChanges };
+    catchupEnabled = saved.catchupEnabled !== false;
     margin = media.normalizeMargin(saved.margin);
     startupEnabled = saved.startupEnabled !== false;
     playbackPreferences = saved;
@@ -791,11 +821,6 @@
     refreshVideo();
     readLatency();
     render();
-  }).catch(() => {
-    startupEnabled = false;
-    autoSettings = autoPolicy.normalizeSettings({ autoEnabled: false }, margin);
-    settingsReady = true;
-    refreshVideo();
-    render();
-  });
+  }
+  void loadSettings();
 })();

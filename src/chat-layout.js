@@ -4,8 +4,10 @@
   const defaults = { chatLayoutEnabled: false, chatLayoutWidth: 1000 };
   const settings = { ...defaults };
   const chatSelector = "#aside-chatting, #vod-aside";
+  const vodLogSelector = '[role="log"]';
   const playerSelector = 'main > div > [class^="_player_"], #player_layout';
   const heightProperty = "--chzzk-catchup-chat-height";
+  const minimumHeight = 240;
   let viewport;
   let resizeObserver;
   let pageObserver;
@@ -16,7 +18,7 @@
   function fitChatHeight() {
     frame = undefined;
     const chat = document.querySelector(
-      '#layout-body #aside-chatting:not([class*="_is_folded_"]), #layout-body #vod-aside:has([role="log"])');
+      `#layout-body #aside-chatting:not([class*="_is_folded_"]), #layout-body #vod-aside:has(${vodLogSelector})`);
     const nextLayout = chat?.closest("#layout-body");
     const nextPlayer = chat?.parentElement.querySelector(playerSelector);
     if (layout !== nextLayout || player !== nextPlayer) {
@@ -40,7 +42,7 @@
     }
     const available = root.clientHeight - top;
     if (available > 0) {
-      root.style.setProperty(heightProperty, `${available}px`);
+      root.style.setProperty(heightProperty, `${Math.max(minimumHeight, available)}px`);
     } else {
       // If the video fills the window, leave chat available by scrolling down.
       root.style.removeProperty(heightProperty);
@@ -51,6 +53,20 @@
     frame ??= requestAnimationFrame(fitChatHeight);
   }
 
+  function affectsLayout(record) {
+    const target = record.target;
+    if (record.attributeName === "class") return target.matches(chatSelector);
+    const chat = target.closest?.(chatSelector);
+    if (record.attributeName === "role") {
+      return chat?.id === "vod-aside" && target !== chat &&
+        (target.matches(vodLogSelector) || record.oldValue === "log");
+    }
+    if (!chat) return true;
+    if (chat.id !== "vod-aside") return false;
+    return [...record.addedNodes, ...record.removedNodes].some(node =>
+      node.matches?.(vodLogSelector) || node.querySelector?.(vodLogSelector));
+  }
+
   function updateLayout() {
     const active = settings.chatLayoutEnabled === true && viewport?.matches === true;
     const root = document.documentElement;
@@ -58,11 +74,12 @@
     if (active && !resizeObserver) {
       resizeObserver = new ResizeObserver(scheduleFit);
       pageObserver = new MutationObserver(records => {
-        if (records.some(record => record.type === "attributes"
-          ? record.target.matches(chatSelector)
-          : !record.target.closest?.(chatSelector))) scheduleFit();
+        if (records.some(affectsLayout)) scheduleFit();
       });
-      pageObserver.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+      pageObserver.observe(root, {
+        subtree: true, childList: true, attributes: true,
+        attributeFilter: ["class", "role"], attributeOldValue: true,
+      });
       window.addEventListener("resize", scheduleFit);
       document.addEventListener("fullscreenchange", scheduleFit);
       scheduleFit();

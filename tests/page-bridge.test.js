@@ -27,6 +27,7 @@ test("MAIN bridge validates origin/actions and returns only its adapter result",
   };
   await emit(request, "https://evil.test");
   await emit({ ...request, action: "load-url" });
+  await emit({ ...request, videoIndex: -1 });
   assert.equal(messages.length, 0);
   await emit(request);
   assert.equal(calls[0], video);
@@ -48,6 +49,12 @@ test("MAIN bridge validates origin/actions and returns only its adapter result",
   assert.equal(messages.at(-1).latency, 2.3);
   await emit({ ...latencyRequest, videoIndex: 0 });
   assert.equal(messages.at(-1).latency, null);
+  for (const action of ["inspect", "switch"]) {
+    await emit({ ...request, action, kind: "main", videoIndex: 2 });
+    assert.equal(messages.at(-1).reason, "player-unavailable");
+    assert.equal(messages.at(-1).ok, false);
+  }
+  assert.equal(calls.length, 3);
   location.pathname = "/video/test";
   await emit(latencyRequest);
   assert.equal(messages.at(-1).latency, null);

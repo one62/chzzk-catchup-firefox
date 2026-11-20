@@ -22,6 +22,11 @@
         <span id="state-badge" class="state-badge">확인 중</span>
       </header>
 
+      <section class="site-access" aria-label="치지직 사이트 접근 권한">
+        <button id="grant-chzzk-access" type="button" class="button button-secondary" disabled>치지직 접근 허용</button>
+        <p id="site-access-status" class="help" role="status" aria-live="polite"></p>
+      </section>
+
       <section class="feature-group catchup-group" aria-labelledby="catchup-title">
         <div class="feature-header">
           <h2 id="catchup-title"><button id="catchup-fold" type="button" aria-expanded="true" aria-controls="catchup-body"><span aria-hidden="true"></span> 따라잡기</button></h2>
@@ -116,8 +121,7 @@
           <input id="clip-enabled" type="checkbox" checked disabled aria-label="클립 편집기 전체 활성화">
         </div>
         <fieldset id="clip-body" class="feature-body">
-        <button id="grant-chzzk-access" type="button" class="button button-secondary">치지직 접근 허용</button>
-        <p id="site-access-status" class="help" role="status" aria-live="polite"></p>
+          <p class="help clip-help">방송의 가위 버튼으로 클립 편집기를 엽니다.</p>
         </fieldset>
       </section>
       <section class="feature-group chat-group" aria-labelledby="chatLayout-title">
