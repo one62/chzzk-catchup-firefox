@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
 const media = require("../src/media.js");
 
 function timeRanges(values) {
@@ -29,6 +31,37 @@ function video(overrides = {}) {
 
 test("browser global and CommonJS expose the same calculation API", () => {
   assert.equal(globalThis.ChzzkCatchupMedia, media);
+});
+
+test("main video selection ignores hidden and small players and prefers the current video on ties", () => {
+  const element = (width, height, style = {}, isConnected = true) => ({
+    style, isConnected, getBoundingClientRect: () => ({ width, height }),
+  });
+  const preview = element(320, 180);
+  const main = element(640, 360);
+  const sameSize = element(640, 360);
+  const larger = element(800, 450);
+  const hidden = [
+    element(1280, 720, { display: "none" }),
+    element(1280, 720, { visibility: "hidden" }),
+    element(1280, 720, { opacity: "0" }),
+    element(1280, 720, {}, false),
+    element(159, 720),
+    element(1280, 89),
+  ];
+  let videos = [...hidden, preview, main, sameSize];
+  const context = vm.createContext({
+    document: { querySelectorAll: () => videos },
+    getComputedStyle: candidate => ({ opacity: "1", ...candidate.style }),
+  });
+  vm.runInContext(fs.readFileSync(require.resolve("../src/media.js"), "utf8"), context);
+  const { findMainVideo } = context.ChzzkCatchupMedia;
+  assert.equal(findMainVideo(), main);
+  assert.equal(findMainVideo(sameSize), sameSize);
+  videos.push(larger);
+  assert.equal(findMainVideo(sameSize), larger);
+  videos = hidden;
+  assert.equal(findMainVideo(main), null);
 });
 
 test("range reads ignore nonfinite, empty, reversed, and invalidated ranges", () => {

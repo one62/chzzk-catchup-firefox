@@ -21,6 +21,7 @@
   }
 
   const editors = new Map();
+  const media = globalThis.ChzzkCatchupMedia;
   const isLive = () => /^\/live\/[^/]+\/?$/.test(location.pathname);
   let keepAudio = false;
   let useEffect = false;
@@ -39,19 +40,8 @@
   let path = location.pathname;
   let watchingClipOpen = false;
 
-  function mainVideo() {
-    let selected = null;
-    let largest = 0;
-    for (const video of document.querySelectorAll("video")) {
-      const box = video.getBoundingClientRect();
-      if (box.width < 160 || box.height < 90 || box.width * box.height <= largest) continue;
-      const style = getComputedStyle(video);
-      if (style.visibility === "hidden" || Number(style.opacity) === 0) continue;
-      largest = box.width * box.height;
-      selected = video;
-    }
-    return selected;
-  }
+  const mainVideo = () => media.findMainVideo(player ??
+    (beforeOpen?.path === location.pathname ? beforeOpen.video : null));
 
   // The site's click handler can mute the broadcast before the editor connects.
   function rememberMute(event) {

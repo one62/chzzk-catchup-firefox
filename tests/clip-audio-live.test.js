@@ -4,10 +4,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
+const mediaSource = fs.readFileSync(require.resolve("../src/media.js"), "utf8");
 const source = fs.readFileSync(require.resolve("../src/clip-audio-live.js"), "utf8");
 
 function live({ muted = false, settings = {}, pathname = "/", failEffect = false } = {}) {
-  const video = { muted, readyState: 4, getBoundingClientRect: () => ({ width: 640, height: 360 }) };
+  const video = { muted, readyState: 4, isConnected: true,
+    getBoundingClientRect: () => ({ width: 640, height: 360 }) };
   const listeners = {};
   const timers = new Set();
   let connect;
@@ -16,7 +18,7 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
   const effect = { created: 0, disposed: 0, options: null };
   const location = { origin: "https://chzzk.naver.com", pathname };
   const window = { addEventListener(name, listener) { listeners[name] = listener; } };
-  vm.runInNewContext(source, {
+  const context = vm.createContext({
     location, window,
     browser: {
       runtime: { onConnect: { addListener(fn) { connect = fn; } } },
@@ -43,6 +45,8 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
       return { dispose() { effect.disposed++; } };
     } },
   });
+  vm.runInContext(mediaSource, context);
+  vm.runInContext(source, context);
   const flush = () => new Promise(resolve => setImmediate(resolve));
   async function setSettings(values) {
     settings = { ...settings, ...values };

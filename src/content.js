@@ -76,34 +76,6 @@
     return catchupEnabled && /^\/live\/[^/]+\/?$/.test(location.pathname);
   }
 
-  function visible(element, box = element?.getBoundingClientRect()) {
-    if (!element?.isConnected) return false;
-    const css = getComputedStyle(element);
-    return box.width > 0 && box.height > 0 && css.display !== "none" &&
-      css.visibility !== "hidden" && Number(css.opacity) !== 0;
-  }
-
-  function findVideo() {
-    if (!isLive()) return null;
-    let selected = null;
-    let largestArea = 0;
-    // Preview cards can coexist with the main player. Prefer the largest
-    // visible video, and keep the current one when candidates have equal area.
-    const candidates = [...document.querySelectorAll("video")];
-    if (video && candidates.includes(video)) {
-      candidates.splice(candidates.indexOf(video), 1);
-      candidates.unshift(video);
-    }
-    for (const candidate of candidates) {
-      const box = candidate.getBoundingClientRect();
-      if (!visible(candidate, box)) continue;
-      if (box.width < 160 || box.height < 90) continue;
-      const area = box.width * box.height;
-      if (area > largestArea) { selected = candidate; largestArea = area; }
-    }
-    return selected;
-  }
-
   function adState() {
     if (!video) return "unknown";
     const player = video.closest(".pzp") || video.closest(".pzp-pc") || video.parentElement;
@@ -113,7 +85,7 @@
       ".pzp-pc__ad-info, .pzp-pc__ad-break-indicator, " +
       ".pzp-pc__ad-click-through-button, [data-ad-state='playing']",
     );
-    return [...markers].some(marker => visible(marker)) ? "detected" : "unknown";
+    return [...markers].some(marker => media.isVisible(marker)) ? "detected" : "unknown";
   }
 
   // Keep the last displayed values across pause and latency-cache resets.
@@ -474,7 +446,7 @@
       userSeekFrom = null;
       autoBlockedUntil = 0;
     }
-    const next = findVideo();
+    const next = isLive() ? media.findMainVideo(video) : null;
     if (next === video) return;
     stopAuto("player-changed");
     finishSeek("player-changed");

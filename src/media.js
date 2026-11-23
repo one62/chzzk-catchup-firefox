@@ -5,6 +5,29 @@
   const MIN_MARGIN = 0.2;
   const MAX_MARGIN = 3;
 
+  function isVisible(element, box = element?.getBoundingClientRect()) {
+    if (!element?.isConnected) return false;
+    const style = getComputedStyle(element);
+    return box.width > 0 && box.height > 0 && style.display !== "none" &&
+      style.visibility !== "hidden" && Number(style.opacity) !== 0;
+  }
+
+  function findMainVideo(current = null) {
+    let selected = null;
+    let largestArea = 0;
+    // Preview cards can coexist with the main player. Keep the current video on ties.
+    for (const candidate of document.querySelectorAll("video")) {
+      const box = candidate.getBoundingClientRect();
+      if (box.width < 160 || box.height < 90 || !isVisible(candidate, box)) continue;
+      const area = box.width * box.height;
+      if (area > largestArea || (area === largestArea && candidate === current)) {
+        selected = candidate;
+        largestArea = area;
+      }
+    }
+    return selected;
+  }
+
   function finiteOrNull(value) {
     return Number.isFinite(value) ? value : null;
   }
@@ -131,7 +154,7 @@
     };
   }
 
-  const api = Object.freeze({ readRanges, normalizeMargin, forwardBuffer, snapshot, planCatchUp });
+  const api = Object.freeze({ isVisible, findMainVideo, readRanges, normalizeMargin, forwardBuffer, snapshot, planCatchUp });
   root.ChzzkCatchupMedia = api;
   if (typeof module === "object" && module.exports) module.exports = api;
 })(globalThis);
