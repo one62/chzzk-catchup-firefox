@@ -4,7 +4,7 @@
 
 ## 설치
 
-Firefox 128 이상에서 설치할 수 있습니다. [Firefox 부가 기능에서 치지직지직 설치](https://addons.mozilla.org/ko/firefox/addon/chzzk-catch-up/)
+데스크톱 Firefox 142 이상에서 설치할 수 있습니다. [Firefox 부가 기능에서 치지직지직 설치](https://addons.mozilla.org/ko/firefox/addon/chzzk-catch-up/)
 
 팝업 상단에 **치지직 접근 허용** 버튼이 표시되면 눌러 권한을 부여하고, 이미 열려 있던 치지직 탭을 새로고침하세요. 이 권한은 따라잡기, 클립 편집기, 채팅창 하단 배치에 공통으로 사용합니다.
 

@@ -11,7 +11,7 @@ assert.equal(manifest.manifest_version, 3);
 assert.equal(manifest.version, pkg.version);
 assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
 assert.deepEqual(manifest.host_permissions, ["https://chzzk.naver.com/*"]);
-assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "128.0");
+assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
 const assets = new Set([manifest.action.default_popup, manifest.action.default_icon,
   "src/clip-compat.js", ...manifest.background.scripts, ...Object.values(manifest.icons)]);
 for (const script of manifest.content_scripts) {
