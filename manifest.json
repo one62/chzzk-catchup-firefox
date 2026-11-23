@@ -11,7 +11,7 @@
     }
   },
   "permissions": ["storage", "scripting"],
-  "background": { "scripts": ["src/clip-registration.js"] },
+  "background": { "scripts": ["src/clip-registration.js", "src/clip-audio-relay.js"] },
   "host_permissions": ["https://chzzk.naver.com/*"],
   "icons": { "48": "icons/chzzk-jijik.svg", "96": "icons/chzzk-jijik.svg" },
   "action": {
@@ -22,13 +22,13 @@
   "content_scripts": [
     {
       "matches": ["https://chzzk.naver.com/*"],
-      "js": ["src/player-stream.js", "src/server-latency.js", "src/page-bridge.js"],
+      "js": ["src/player-stream.js", "src/server-latency.js", "src/page-bridge.js", "src/clip-audio-editor.js"],
       "run_at": "document_idle",
       "world": "MAIN"
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
-      "js": ["src/media.js", "src/auto-policy.js", "src/playback-policy.js", "src/buffer-optimizer.js", "src/latency-average.js", "src/player-label.js", "src/rate-indicator.js", "src/content.js", "src/chat-layout.js"],
+      "js": ["src/media.js", "src/auto-policy.js", "src/playback-policy.js", "src/buffer-optimizer.js", "src/latency-average.js", "src/player-label.js", "src/rate-indicator.js", "src/content.js", "src/chat-layout.js", "src/clip-audio-effects.js", "src/clip-audio-open.js", "src/clip-audio-live.js"],
       "css": ["src/chat-layout.css"],
       "run_at": "document_idle"
     }
