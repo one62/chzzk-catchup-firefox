@@ -6,7 +6,7 @@
   const scope = { origins: ["https://chzzk.naver.com/*"] };
   const accessHelp = "치지직 기능을 사용하려면 사이트 접근을 허용해 주세요.";
   const checkFailed = "접근 권한 확인 실패";
-  const reloadHelp = "방송을 새로고침하고 편집기를 다시 열어 주세요.";
+  const reloadHelp = "열려 있는 치지직 탭을 새로고침해 주세요.";
   let requesting = false;
   let generation = 0;
   let previousGrant = null;

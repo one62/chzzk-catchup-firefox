@@ -41,7 +41,7 @@ test("opening the popup only checks access; a click requests the declared CHZZK 
   await app.flush();
   assert.equal(app.button.disabled, true);
   assert.match(app.button.textContent, /허용됨/);
-  assert.match(app.status.textContent, /새로고침/);
+  assert.equal(app.status.textContent, "열려 있는 치지직 탭을 새로고침해 주세요.");
 });
 
 test("existing access remains visible and revocation enables the grant button again", async () => {

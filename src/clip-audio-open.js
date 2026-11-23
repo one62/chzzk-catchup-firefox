@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  function install(shouldPreventMute, findVideo, onPreventedMute) {
+  function install(shouldPreventMute, findVideo, onOpen, onPreventedMute) {
     const page = window.wrappedJSObject;
     if (!page || typeof exportFunction !== "function") return;
 
@@ -34,13 +34,17 @@
 
     page.open = exportFunction(function (url, target) {
       const popup = Reflect.apply(open, this, arguments);
-      if (popup && target === "chzzkClipEditor" &&
-          typeof url === "string" && /^\/clip-editor\/?(?:[?#]|$)/.test(url) && shouldPreventMute()) {
-        try {
-          guardMute(findVideo());
-        } catch (error) {
-          console.warn("[CHZZK Catch-up] 클립 편집기를 열 때 생방송 음소거를 막을 수 없습니다.", error);
-        }
+      if (!popup || target !== "chzzkClipEditor" || typeof url !== "string" || !url ||
+          !shouldPreventMute()) return popup;
+      try {
+        const editor = new URL(url, document.baseURI);
+        if (editor.origin !== location.origin || !/^\/clip-editor\/?$/.test(editor.pathname)) return popup;
+        const video = findVideo();
+        if (!video) return popup;
+        onOpen(video);
+        guardMute(video);
+      } catch (error) {
+        console.warn("[CHZZK Catch-up] 클립 편집기를 열 때 생방송 음소거를 막을 수 없습니다.", error);
       }
       return popup;
     }, page);

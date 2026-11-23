@@ -4,6 +4,31 @@
   // Firefox allows a single source node per element. Reuse it after bypassing.
   const sources = new WeakMap();
   let context;
+  let hasSource = false;
+  let activeEffects = 0;
+
+  function resume() {
+    if ((hasSource || activeEffects > 0) && context.state === "suspended") {
+      context.resume().catch(() => {});
+    }
+  }
+
+  function resumeWhenVisible() {
+    if (document.visibilityState === "visible") resume();
+  }
+
+  function getContext() {
+    if (!context) {
+      context = new AudioContext();
+      // Bypassed media still uses this context after the effect is disposed.
+      context.addEventListener("statechange", resumeWhenVisible);
+      document.addEventListener("pointerdown", resume, true);
+      document.addEventListener("keydown", resume, true);
+      document.addEventListener("visibilitychange", resumeWhenVisible);
+      window.addEventListener("pageshow", resume);
+    }
+    return context;
+  }
 
   function filter(ctx, type, frequency) {
     const node = ctx.createBiquadFilter();
@@ -13,13 +38,16 @@
     return node;
   }
 
-  function create(video, { useEffect, usePan }) {
+  function checkSourceOrigin(video) {
     if (video.currentSrc && !video.crossOrigin && !video.srcObject &&
         new URL(video.currentSrc, location.href).origin !== location.origin) {
       throw new Error("이 외부 미디어의 오디오는 Web Audio로 처리할 수 없습니다.");
     }
-    context ??= new AudioContext();
-    const ctx = context;
+  }
+
+  function create(video, { useEffect, usePan }) {
+    checkSourceOrigin(video);
+    const ctx = getContext();
     const nodes = [];
     if (useEffect) {
       const volume = ctx.createGain();
@@ -44,8 +72,13 @@
 
     function activate() {
       if (disposed || source || ctx.state !== "running") return;
-      source = sources.get(video) ?? ctx.createMediaElementSource(video);
-      sources.set(video, source);
+      source = sources.get(video);
+      if (!source) {
+        checkSourceOrigin(video);
+        source = ctx.createMediaElementSource(video);
+        sources.set(video, source);
+        hasSource = true;
+      }
       try {
         source.disconnect();
         let output = source;
@@ -65,23 +98,17 @@
       }
     }
 
-    function resume() {
-      if (ctx.state === "suspended") ctx.resume().catch(() => {});
-    }
-
     activate();
     ctx.addEventListener("statechange", activateWhenReady);
-    document.addEventListener("pointerdown", resume, true);
-    document.addEventListener("keydown", resume, true);
+    activeEffects++;
     resume();
 
     return {
       dispose() {
         if (disposed) return;
         disposed = true;
+        activeEffects--;
         ctx.removeEventListener("statechange", activateWhenReady);
-        document.removeEventListener("pointerdown", resume, true);
-        document.removeEventListener("keydown", resume, true);
         bypass();
       }
     };

@@ -14,12 +14,14 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
   const timers = new Set();
   let connect;
   let storageChanged;
+  let notifyOpen;
   let preventMute;
+  let now = 1000;
   const effect = { created: 0, disposed: 0, options: null };
   const location = { origin: "https://chzzk.naver.com", pathname };
   const window = { addEventListener(name, listener) { listeners[name] = listener; } };
   const context = vm.createContext({
-    location, window,
+    location, window, Date: { now: () => now },
     browser: {
       runtime: { onConnect: { addListener(fn) { connect = fn; } } },
       storage: {
@@ -31,7 +33,8 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
     getComputedStyle: () => ({ visibility: "visible", opacity: "1" }),
     setInterval(fn) { timers.add(fn); return fn; }, clearInterval(id) { timers.delete(id); },
     console: { warn() {} },
-    ClipAudioOpen: { install(allowed, findVideo, onPreventedMute) {
+    ClipAudioOpen: { install(allowed, findVideo, onOpen, onPreventedMute) {
+      notifyOpen = () => { if (allowed()) onOpen(findVideo()); };
       preventMute = () => {
         if (!allowed()) return false;
         onPreventedMute(findVideo());
@@ -53,10 +56,12 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
     storageChanged(Object.fromEntries(Object.keys(values).map(key => [key, {}])), "local");
     await flush();
   }
-  function simulateClipClick({ intercept = false } = {}) {
+  function simulateClipClick({ intercept = false, deferMute = false } = {}) {
     location.pathname = "/live/test";
     listeners.pointerdown({ isTrusted: true, type: "pointerdown" });
-    if (!intercept || !preventMute?.()) video.muted = true;
+    listeners.click({ isTrusted: true, type: "click" });
+    notifyOpen?.();
+    if (!deferMute && (!intercept || !preventMute?.())) video.muted = true;
   }
   function openPort() {
     let onDisconnect;
@@ -75,7 +80,8 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
     }
     return { editor, notify };
   }
-  return { video, listeners, timers, effect, location, flush, setSettings, simulateClipClick, openPort, popup };
+  return { video, listeners, timers, effect, location, flush, setSettings, simulateClipClick, openPort, popup,
+    advanceTime(ms) { now += ms; } };
 }
 
 test("the parent option restores audio with no effect, including after live SPA navigation", async () => {
@@ -90,16 +96,46 @@ test("the parent option restores audio with no effect, including after live SPA 
   assert.equal(app.timers.size, 0);
 });
 
-test("a prevented startup mute can be reapplied when disabling the option mid-edit", async () => {
+test("input before the editor connects preserves a prevented mute for disabling the option mid-edit", async () => {
   const app = live({ settings: { clipKeepLiveAudio: true } });
   await app.flush();
   app.simulateClipClick({ intercept: true });
   assert.equal(app.video.muted, false);
+  app.advanceTime(1500);
+  app.listeners.keydown({ isTrusted: true, type: "keydown" });
+  app.listeners.pointerdown({ isTrusted: true, type: "pointerdown" });
   const editor = app.openPort();
   await app.setSettings({ clipKeepLiveAudio: false });
   assert.equal(app.video.muted, true);
   editor.close();
   assert.equal(app.video.muted, false);
+});
+
+test("input before the editor connects preserves the state before an asynchronous mute", async () => {
+  const app = live({ settings: { clipKeepLiveAudio: true } });
+  await app.flush();
+  app.simulateClipClick({ deferMute: true });
+  app.video.muted = true;
+  app.advanceTime(1500);
+  app.listeners.pointerdown({ isTrusted: true, type: "pointerdown" });
+  app.listeners.keydown({ isTrusted: true, type: "keydown" });
+  const editor = app.popup();
+  editor.notify(true);
+  assert.equal(app.video.muted, false);
+  editor.notify(false);
+  assert.equal(app.video.muted, false);
+});
+
+test("a confirmed snapshot does not hold unrelated gestures after changing broadcasts", async () => {
+  const app = live({ settings: { clipKeepLiveAudio: true } });
+  await app.flush();
+  app.simulateClipClick({ intercept: true });
+  app.location.pathname = "/live/other";
+  app.video.muted = true;
+  app.listeners.pointerdown({ isTrusted: true, type: "pointerdown" });
+  const editor = app.openPort();
+  assert.equal(app.video.muted, true);
+  editor.close();
 });
 
 test("the effect is gated by the parent and active only while an editor is open", async () => {

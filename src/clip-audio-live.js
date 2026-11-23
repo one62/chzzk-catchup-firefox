@@ -21,6 +21,8 @@
   }
 
   const editors = new Map();
+  const clickSnapshotMs = 1200;
+  const editorSnapshotMs = 20000;
   const media = globalThis.ChzzkCatchupMedia;
   const isLive = () => /^\/live\/[^/]+\/?$/.test(location.pathname);
   let keepAudio = false;
@@ -43,6 +45,11 @@
   const mainVideo = () => media.findMainVideo(player ??
     (beforeOpen?.path === location.pathname ? beforeOpen.video : null));
 
+  function hasRecentSnapshot(video, time, maxAge) {
+    return beforeOpen?.video === video && beforeOpen.path === location.pathname &&
+      time - beforeOpen.time < maxAge;
+  }
+
   // The site's click handler can mute the broadcast before the editor connects.
   function rememberMute(event) {
     if (!event.isTrusted || !isLive()) return;
@@ -51,12 +58,25 @@
       return;
     }
     const video = mainVideo();
-    if (event.type === "click" && beforeOpen?.video === video && Date.now() - beforeOpen.time < 1200) return;
-    if (video) beforeOpen = { video, muted: video.muted, time: Date.now(), path: location.pathname };
+    if (!video) return;
+    const time = Date.now();
+    if (beforeOpen?.opened && hasRecentSnapshot(video, time, editorSnapshotMs)) return;
+    if (event.type === "click" && hasRecentSnapshot(video, time, clickSnapshotMs)) return;
+    beforeOpen = { video, muted: video.muted, time, path: location.pathname };
   }
   window.addEventListener("pointerdown", rememberMute, true);
   window.addEventListener("keydown", rememberMute, true);
   window.addEventListener("click", rememberMute, true);
+
+  // The popup can connect well after the gesture that opened it.
+  function rememberClipOpen(video) {
+    if (editors.size) return;
+    const time = Date.now();
+    const maxAge = beforeOpen?.opened ? editorSnapshotMs : clickSnapshotMs;
+    beforeOpen = hasRecentSnapshot(video, time, maxAge)
+      ? { ...beforeOpen, opened: true, time }
+      : { video, muted: video.muted, opened: true, time, path: location.pathname };
+  }
 
   function recordPreventedMute(video) {
     if (player === video && editors.size) {
@@ -64,7 +84,8 @@
       writtenMute = false;
       return;
     }
-    beforeOpen = { video, muted: false, preventedMute: true, time: Date.now(), path: location.pathname };
+    beforeOpen = { video, muted: false, opened: true, preventedMute: true, time: Date.now(),
+      path: location.pathname };
   }
 
   document.addEventListener("volumechange", event => {
@@ -95,12 +116,11 @@
     stopEffect();
     player = next;
     if (!player) return;
-    const recentGesture = beforeOpen?.video === player && beforeOpen.path === path &&
-      Date.now() - beforeOpen.time < 20000;
-    const preventedMute = recentGesture && beforeOpen.preventedMute;
+    const recentSnapshot = hasRecentSnapshot(player, Date.now(), editorSnapshotMs);
+    const preventedMute = recentSnapshot && beforeOpen.preventedMute;
     nativeMuted = Boolean(preventedMute || player.muted);
     if (preventedMute && !player.muted) writtenMute = false;
-    originalMuted = recentGesture ? beforeOpen.muted : nativeMuted;
+    originalMuted = recentSnapshot ? beforeOpen.muted : nativeMuted;
   }
 
   function isEditorWindow(source) {
@@ -208,7 +228,7 @@
       useEffect = nextEffect;
       usePan = nextPan;
       if (keepAudio && !watchingClipOpen) {
-        ClipAudioOpen.install(() => keepAudio && isLive(), mainVideo, recordPreventedMute);
+        ClipAudioOpen.install(() => keepAudio && isLive(), mainVideo, rememberClipOpen, recordPreventedMute);
         watchingClipOpen = true;
       }
       if (editors.size) refresh();
