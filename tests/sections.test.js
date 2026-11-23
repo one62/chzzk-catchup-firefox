@@ -6,6 +6,66 @@ const vm = require("node:vm");
 const path = require("node:path");
 const source = fs.readFileSync(path.join(__dirname, "../popup/sections.js"), "utf8");
 
+test("clip audio effect depends on the parent switch and restores its saved choice", async () => {
+  const html = fs.readFileSync(path.join(__dirname, "../popup/popup.html"), "utf8");
+  const body = html.slice(html.indexOf('id="clip-body"'), html.indexOf('aria-labelledby="chatLayout-title"'));
+  const keys = [...body.matchAll(/id="([\w-]+)" type="checkbox"/g)].map(match => match[1]);
+  assert.deepEqual(keys, ["clip-keep-live-audio", "clip-live-audio-effect", "clip-live-audio-pan"]);
+  const saved = {};
+  let listener;
+  let fail = false;
+  const browser = { storage: {
+    local: {
+      get: async () => ({ ...saved }),
+      set: async values => {
+        if (fail) throw new Error("storage unavailable");
+        Object.assign(saved, values);
+        listener(Object.fromEntries(Object.entries(values).map(([key, newValue]) => [key, { newValue }])), "local");
+      },
+    },
+    onChanged: { addListener(fn) { listener = fn; } },
+  } };
+  async function open() {
+    const elements = {};
+    const document = { getElementById(id) {
+      return elements[id] ??= { addEventListener(type, fn) { this[type] = fn; }, setAttribute() {} };
+    } };
+    vm.runInNewContext(source, { document, browser, window: { addEventListener() {} } });
+    await new Promise(setImmediate);
+    return elements;
+  }
+  let ui = await open();
+  const [parent, child, pan] = keys;
+  assert.equal(ui[parent].checked, false);
+  assert.equal(ui[child].disabled, true);
+  assert.equal(ui[pan].disabled, true);
+  async function change(key, enabled) {
+    const input = ui[key];
+    input.checked = enabled;
+    await input.change();
+  }
+  await change(parent, true);
+  assert.equal(ui[child].disabled, false);
+  await change(pan, true);
+  assert.equal(ui[child].checked, false);
+  await change(child, true);
+  ui = await open();
+  assert.equal(ui[parent].checked, true);
+  assert.equal(ui[child].checked, true);
+  assert.equal(ui[pan].checked, true);
+  fail = true;
+  await change(parent, false);
+  assert.equal(ui[parent].checked, true);
+  assert.match(ui["feature-note"].textContent, /저장하지 못했습니다/);
+  fail = false;
+  await change(parent, false);
+  assert.equal(ui[child].disabled, true);
+  assert.equal(saved.clipLiveAudioEffect, true);
+  await change(parent, true);
+  assert.equal(ui[child].checked, true);
+  assert.equal(ui[child].disabled, false);
+});
+
 test("fold and enable switches are independent and restored in a new popup", async () => {
   const saved = {};
   const api = {
