@@ -49,6 +49,10 @@ test('release staging requires matching versions and confirmed text; listing is 
     });
     fs.writeFileSync(path.join(release, 'reviewer.md'), 'TODO');
     assert.throws(() => prepare(root, 'v1.2.3'), /Unfinished text/);
+    fs.writeFileSync(path.join(release, 'reviewer.md'), 'a'.repeat(2979));
+    assert.throws(() => prepare(root, 'v1.2.3'), /exceed 3000 characters/);
+    fs.writeFileSync(path.join(release, 'reviewer.md'), 'a'.repeat(2978));
+    assert.doesNotThrow(() => prepare(root, 'v1.2.3'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

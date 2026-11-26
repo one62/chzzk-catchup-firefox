@@ -23,9 +23,11 @@ export function prepare(root, tag) {
   const releaseNotes = { ko: read(path.join(release, 'notes.ko.md')) };
   const englishNotes = path.join(release, 'notes.en.md');
   if (fs.existsSync(englishNotes)) releaseNotes['en-US'] = read(englishNotes);
+  const approvalNotes = [read(path.join(root, 'amo/reviewer-common.md')), read(path.join(release, 'reviewer.md'))].join('\n\n');
+  assert.ok(approvalNotes.length <= 3000, `Approval notes exceed 3000 characters (${approvalNotes.length})`);
   const metadata = { version: {
     release_notes: releaseNotes,
-    approval_notes: [read(path.join(root, 'amo/reviewer-common.md')), read(path.join(release, 'reviewer.md'))].join('\n\n'),
+    approval_notes: approvalNotes,
   } };
   const listing = config.updateListing ? {
     summary: { ko: read(path.join(root, 'amo/summary.ko.txt')) },
