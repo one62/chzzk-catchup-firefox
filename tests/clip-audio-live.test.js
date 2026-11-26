@@ -8,12 +8,12 @@ const mediaSource = fs.readFileSync(require.resolve("../src/media.js"), "utf8");
 const effectsSource = fs.readFileSync(require.resolve("../src/clip-audio-effects.js"), "utf8");
 const source = fs.readFileSync(require.resolve("../src/clip-audio-live.js"), "utf8");
 
-function live({ muted = false, settings = {}, pathname = "/", failEffect = false, opener = null,
+function live({ muted = false, volume = 0.8, settings = {}, pathname = "/", failEffect = false, opener = null,
   readSettings = null } = {}) {
   let layoutReads = 0;
   let styleReads = 0;
   const makeVideo = (overrides = {}) => ({
-    muted, paused: false, readyState: 4, isConnected: true, currentSrc: "blob:https://chzzk.naver.com/clip",
+    muted, volume, paused: false, readyState: 4, isConnected: true, currentSrc: "blob:https://chzzk.naver.com/clip",
     getBoundingClientRect() { layoutReads++; return { width: 640, height: 360 }; },
     ...overrides,
   });
@@ -27,7 +27,7 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
   let notifyOpen;
   let preventMute;
   let now = 1000;
-  const effect = { created: 0, disposed: 0, videos: [] };
+  const effect = { created: 0, disposed: 0, videos: [], sides: [] };
   const location = { origin: "https://chzzk.naver.com", pathname,
     get href() { return `${this.origin}${this.pathname}`; } };
   const window = { opener, addEventListener(name, listener) { listeners[name] = listener; } };
@@ -74,11 +74,15 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
         if (!video.currentSrc) return false;
         return new URL(video.currentSrc, location.href).origin === location.origin;
       },
-      create(video) {
+      create(video, options = {}) {
         if (failEffect) throw new Error("unsupported source");
         effect.created++;
         effect.videos.push(video);
-        return { dispose() { effect.disposed++; } };
+        effect.sides.push(options.side ?? "right");
+        return {
+          setSide(side) { effect.sides[effect.sides.length - 1] = side; },
+          dispose() { effect.disposed++; },
+        };
       },
     },
   });
@@ -130,16 +134,48 @@ function live({ muted = false, settings = {}, pathname = "/", failEffect = false
   };
 }
 
-test("the parent option restores live audio without attaching Web Audio on the live tab", async () => {
-  const app = live({ settings: { clipKeepLiveAudio: true, clipEditorAudioPan: true } });
+test("the parent option restores live audio, reduces live volume by 25%, and restores it on close", async () => {
+  const app = live({ volume: 0.8, settings: { clipKeepLiveAudio: true, clipEditorAudioPan: true } });
   await app.flush();
   app.simulateClipClick();
   const editor = app.openPort();
   assert.equal(app.video.muted, false);
+  assert.ok(Math.abs(app.video.volume - 0.6) < 1e-9);
   assert.equal(app.effect.created, 0);
   editor.close();
   assert.equal(app.video.muted, false);
+  assert.ok(Math.abs(app.video.volume - 0.8) < 1e-9);
   assert.equal(app.timers.size, 0);
+});
+
+test("live volume reduction respects manual volume adjustments and option toggles mid-edit", async () => {
+  const app = live({ volume: 0.8, settings: { clipKeepLiveAudio: true } });
+  await app.flush();
+  app.simulateClipClick();
+  const editor = app.openPort();
+  assert.ok(Math.abs(app.video.volume - 0.6) < 1e-9);
+
+  await app.setSettings({ clipKeepLiveAudio: false });
+  assert.ok(Math.abs(app.video.volume - 0.8) < 1e-9);
+
+  await app.setSettings({ clipKeepLiveAudio: true });
+  assert.ok(Math.abs(app.video.volume - 0.6) < 1e-9);
+
+  app.video.volume = 0.4;
+  app.listeners.volumechange({ target: app.video });
+  for (const tick of app.timers) tick();
+  assert.equal(app.video.volume, 0.4);
+  editor.close();
+  assert.equal(app.video.volume, 0.4);
+
+  const mutedApp = live({ muted: true, volume: 0.8, settings: { clipKeepLiveAudio: true } });
+  await mutedApp.flush();
+  mutedApp.simulateClipClick();
+  const mutedEditor = mutedApp.openPort();
+  assert.equal(mutedApp.video.muted, true);
+  assert.equal(mutedApp.video.volume, 0.8);
+  mutedEditor.close();
+  assert.equal(mutedApp.video.volume, 0.8);
 });
 
 test("input before the editor connects preserves a prevented mute for disabling the option mid-edit", async () => {
@@ -280,6 +316,15 @@ test("clip editor applies right panning only when enabled with mute prevention, 
     await app.setSettings({ clipKeepLiveAudio: true });
     assert.equal(app.effect.created, 1);
     assert.equal(app.effect.videos[0], app.video);
+    assert.equal(app.effect.sides.at(-1), "right");
+
+    await app.setSettings({ clipEditorAudioPanSide: "left" });
+    assert.equal(app.effect.created, 1);
+    assert.equal(app.effect.sides.at(-1), "left");
+
+    await app.setSettings({ clipEditorAudioPanSide: "right" });
+    assert.equal(app.effect.created, 1);
+    assert.equal(app.effect.sides.at(-1), "right");
 
     app.resetReads();
     app.docListeners.playing({ type: "playing", target: app.video });
@@ -517,6 +562,6 @@ test("deferred AudioContext cancellation on pause and error on origin change bot
   ctx.state = "running";
   ctx.dispatchEvent(new Event("statechange"));
   assert.equal(sources.length, 1);
-  assert.equal(sources[0].output.pan.value, 0.55);
+  assert.equal(sources[0].output.pan.value, 0.4);
   assert.equal(sources[0].output.output, destination);
 });

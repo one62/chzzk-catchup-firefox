@@ -11,6 +11,8 @@ test("clip editor panning depends on the parent switch and restores its saved ch
   const body = html.slice(html.indexOf('id="clip-body"'), html.indexOf('aria-labelledby="chatLayout-title"'));
   const keys = [...body.matchAll(/id="([\w-]+)" type="checkbox"/g)].map(match => match[1]);
   assert.deepEqual(keys, ["clip-keep-live-audio", "clip-editor-audio-pan"]);
+  assert.match(body, /id="clip-editor-pan-left"/);
+  assert.match(body, /id="clip-editor-pan-right"/);
   const saved = {};
   let listener;
   let fail = false;
@@ -28,7 +30,10 @@ test("clip editor panning depends on the parent switch and restores its saved ch
   async function open() {
     const elements = {};
     const document = { getElementById(id) {
-      return elements[id] ??= { addEventListener(type, fn) { this[type] = fn; }, setAttribute() {} };
+      return elements[id] ??= {
+        addEventListener(type, fn) { this[type] = fn; },
+        setAttribute(name, value) { this[name] = value; },
+      };
     } };
     vm.runInNewContext(source, { document, browser, window: { addEventListener() {} } });
     await new Promise(setImmediate);
@@ -36,8 +41,14 @@ test("clip editor panning depends on the parent switch and restores its saved ch
   }
   let ui = await open();
   const [parent, pan] = keys;
+  const left = "clip-editor-pan-left";
+  const right = "clip-editor-pan-right";
   assert.equal(ui[parent].checked, false);
   assert.equal(ui[pan].disabled, true);
+  assert.equal(ui[left].disabled, true);
+  assert.equal(ui[right].disabled, true);
+  assert.equal(ui[left]["aria-pressed"], "false");
+  assert.equal(ui[right]["aria-pressed"], "true");
   async function change(key, enabled) {
     const input = ui[key];
     input.checked = enabled;
@@ -45,21 +56,35 @@ test("clip editor panning depends on the parent switch and restores its saved ch
   }
   await change(parent, true);
   assert.equal(ui[pan].disabled, false);
+  assert.equal(ui[left].disabled, false);
+  assert.equal(ui[right].disabled, false);
   await change(pan, true);
+  await ui[left].click();
+  assert.equal(ui[left]["aria-pressed"], "true");
+  assert.equal(ui[right]["aria-pressed"], "false");
   ui = await open();
   assert.equal(ui[parent].checked, true);
   assert.equal(ui[pan].checked, true);
+  assert.equal(ui[left]["aria-pressed"], "true");
+  assert.equal(ui[right]["aria-pressed"], "false");
   fail = true;
+  await ui[right].click();
+  assert.equal(ui[left]["aria-pressed"], "true");
+  assert.match(ui["feature-note"].textContent, /저장하지 못했습니다/);
   await change(parent, false);
   assert.equal(ui[parent].checked, true);
   assert.match(ui["feature-note"].textContent, /저장하지 못했습니다/);
   fail = false;
   await change(parent, false);
   assert.equal(ui[pan].disabled, true);
+  assert.equal(ui[left].disabled, true);
   assert.equal(saved.clipEditorAudioPan, true);
+  assert.equal(saved.clipEditorAudioPanSide, "left");
   await change(parent, true);
   assert.equal(ui[pan].checked, true);
   assert.equal(ui[pan].disabled, false);
+  assert.equal(ui[left].disabled, false);
+  assert.equal(ui[left]["aria-pressed"], "true");
 });
 
 test("fold and enable switches are independent and restored in a new popup", async () => {

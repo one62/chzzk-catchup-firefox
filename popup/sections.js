@@ -2,7 +2,9 @@
   const api = globalThis.browser || globalThis.chrome;
   const note = document.getElementById("feature-note");
   const width = document.getElementById("chat-width");
-  const defaults = { chatLayoutWidth: 1000, clipKeepLiveAudio: false, clipEditorAudioPan: false };
+  const defaults = {
+    chatLayoutWidth: 1000, clipKeepLiveAudio: false, clipEditorAudioPan: false, clipEditorAudioPanSide: "right",
+  };
   const apply = new Map();
   const readError = "섹션 설정을 읽지 못했습니다. 다시 시도 중입니다.";
   let savedWidth = 1000;
@@ -18,11 +20,44 @@
   ];
   const audioSettings = {};
   const audioWrites = new Set();
+  const panSideButtons = [
+    ["left", document.getElementById("clip-editor-pan-left")],
+    ["right", document.getElementById("clip-editor-pan-right")],
+  ];
+  let panSide = "right";
+  let panSideWriting = false;
   function renderAudioControls() {
     for (const [key, input] of audioControls) {
       input.checked = audioSettings[key] === true;
       input.disabled = audioWrites.has(key) || (input !== keepAudio && (keepAudio.disabled || !keepAudio.checked));
     }
+    const sideDisabled = panSideWriting || keepAudio.disabled || !keepAudio.checked;
+    for (const [side, button] of panSideButtons) {
+      if (!button) continue;
+      button.setAttribute("aria-pressed", String(panSide === side));
+      button.disabled = sideDisabled;
+    }
+  }
+  apply.set("clipEditorAudioPanSide", value => {
+    panSide = value === "left" ? "left" : "right";
+    renderAudioControls();
+  });
+  for (const [side, button] of panSideButtons) {
+    button?.addEventListener("click", async () => {
+      if (!ready || button.disabled || panSide === side) return;
+      panSideWriting = true;
+      renderAudioControls();
+      try {
+        await api.storage.local.set({ clipEditorAudioPanSide: side });
+        panSide = side;
+        note.textContent = "";
+      } catch {
+        note.textContent = "클립 오디오 설정을 저장하지 못했습니다.";
+      } finally {
+        panSideWriting = false;
+        renderAudioControls();
+      }
+    });
   }
   for (const [key, input] of audioControls) {
     apply.set(key, value => {

@@ -9,6 +9,7 @@
   if (isEditor(location.pathname)) {
     let port = null;
     let usePan = false;
+    let panSide = "right";
     let settingsRevision = 0;
     let pageHidden = false;
     let panVideo = null;
@@ -70,6 +71,7 @@
           return;
         }
         panSourceKey = key;
+        panEngine.setSide?.(panSide);
         return;
       }
       const video = media.findMainVideo(panVideo);
@@ -86,6 +88,7 @@
       }
       if (panEngine) {
         panSourceKey = key;
+        panEngine.setSide?.(panSide);
         return;
       }
       if (video.readyState < 1 || video.paused === true) return;
@@ -94,6 +97,7 @@
         let settled = false;
         let created;
         created = ClipAudioEffects.create(video, {
+          side: panSide,
           canAttach: () => !pageHidden && usePan && isEditor(location.pathname),
           onCancel() {
             settled = true;
@@ -132,12 +136,13 @@
       if (pageHidden) return;
       const revision = ++settingsRevision;
       browser.storage.local.get({
-        clipEnabled: true, clipKeepLiveAudio: false, clipEditorAudioPan: false,
+        clipEnabled: true, clipKeepLiveAudio: false, clipEditorAudioPan: false, clipEditorAudioPanSide: "right",
       }).then(settings => {
         if (pageHidden || revision !== settingsRevision) return;
         usePan = settings.clipEnabled !== false &&
           settings.clipKeepLiveAudio === true &&
           settings.clipEditorAudioPan === true;
+        panSide = settings.clipEditorAudioPanSide === "left" ? "left" : "right";
         syncPan();
       }).catch(() => {});
     }
@@ -153,7 +158,8 @@
     }
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (!["clipEnabled", "clipKeepLiveAudio", "clipEditorAudioPan"].some(key => key in changes)) return;
+      if (!["clipEnabled", "clipKeepLiveAudio", "clipEditorAudioPan", "clipEditorAudioPanSide"]
+        .some(key => key in changes)) return;
       const disabledByChange = (key, defaultTrue = false) => {
         const change = changes[key];
         if (!change || (!Object.hasOwn(change, "newValue") && !Object.hasOwn(change, "oldValue"))) return false;
@@ -164,6 +170,9 @@
           disabledByChange("clipEditorAudioPan")) {
         usePan = false;
         stopPan();
+      } else if (changes.clipEditorAudioPanSide && Object.hasOwn(changes.clipEditorAudioPanSide, "newValue")) {
+        panSide = changes.clipEditorAudioPanSide.newValue === "left" ? "left" : "right";
+        panEngine?.setSide?.(panSide);
       }
       loadEditorSettings();
     });
@@ -187,6 +196,7 @@
   const editors = new Map();
   const clickSnapshotMs = 1200;
   const editorSnapshotMs = 20000;
+  const LIVE_VOLUME_SCALE = 0.75;
   const isLive = () => /^\/live\/[^/]+\/?$/.test(location.pathname);
   let keepAudio = false;
   let settingsRevision = 0;
@@ -197,12 +207,19 @@
   let writtenMute = null;
   let managingMute = false;
   let muteGraceUntil = 0;
+  let originalVolume = null;
+  let writtenVolume = null;
+  let managingVolume = false;
   let timer = null;
   let path = location.pathname;
   let watchingClipOpen = false;
 
   const mainVideo = () => media.findMainVideo(player ??
     (beforeOpen?.path === location.pathname ? beforeOpen.video : null));
+
+  function sameVolume(a, b) {
+    return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 0.001;
+  }
 
   function hasRecentSnapshot(video, time, maxAge) {
     return beforeOpen?.video === video && beforeOpen.path === location.pathname &&
@@ -262,8 +279,13 @@
   }
 
   document.addEventListener("volumechange", event => {
-    if (event.target === player && writtenMute !== null && player.muted !== writtenMute &&
-        Date.now() >= muteGraceUntil) writtenMute = null;
+    if (event.target !== player) return;
+    if (writtenMute !== null && player.muted !== writtenMute && Date.now() >= muteGraceUntil) {
+      writtenMute = null;
+    }
+    if (writtenVolume !== null && !sameVolume(player.volume, writtenVolume)) {
+      writtenVolume = null;
+    }
   }, true);
 
   function restoreMute(muted) {
@@ -276,9 +298,37 @@
     managingMute = false;
   }
 
+  function reduceVolume() {
+    if (!player || managingVolume) return;
+    managingVolume = true;
+    if (!Number.isFinite(player.volume) || player.volume <= 0) {
+      originalVolume = null;
+      writtenVolume = null;
+      return;
+    }
+    originalVolume = player.volume;
+    const reduced = Math.max(0, Math.min(1, originalVolume * LIVE_VOLUME_SCALE));
+    writtenVolume = reduced;
+    player.volume = reduced;
+    if (writtenVolume !== null) writtenVolume = player.volume;
+  }
+
+  function restoreVolume() {
+    if (player && originalVolume !== null && writtenVolume !== null &&
+        sameVolume(player.volume, writtenVolume)) {
+      const target = originalVolume;
+      writtenVolume = target;
+      player.volume = target;
+    }
+    originalVolume = null;
+    writtenVolume = null;
+    managingVolume = false;
+  }
+
   function setPlayer(next) {
     if (next === player) return;
     restoreMute(originalMuted);
+    restoreVolume();
     writtenMute = null;
     player = next;
     if (!player) return;
@@ -326,6 +376,7 @@
     if (!player) return;
     if (!keepAudio) {
       if (managingMute || writtenMute === false) restoreMute(nativeMuted);
+      restoreVolume();
       return;
     }
     if (!managingMute) {
@@ -337,6 +388,7 @@
       player.muted = false;
       writtenMute = false;
     }
+    if (!player.muted) reduceVolume();
   }
 
   function addEditor(editor, session) {

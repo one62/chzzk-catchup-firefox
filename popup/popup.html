@@ -125,7 +125,15 @@
           <div class="clip-audio-options">
             <label><input id="clip-keep-live-audio" type="checkbox" disabled>클립 편집 중 생방송 음소거 방지</label>
             <div class="clip-audio-effect">
-              <label><input id="clip-editor-audio-pan" type="checkbox" disabled>클립 편집기 소리를 오른쪽으로 패닝</label>
+              <div class="clip-pan-row">
+                <input id="clip-editor-audio-pan" type="checkbox" disabled>
+                <span class="clip-pan-text">
+                  <label for="clip-editor-audio-pan">클립 편집기 소리를</label>
+                  <span class="clip-pan-side" role="group" aria-label="패닝 방향">
+                    <button id="clip-editor-pan-left" type="button" aria-pressed="false" disabled>왼쪽</button><span class="clip-pan-sep" aria-hidden="true">|</span><button id="clip-editor-pan-right" type="button" aria-pressed="true" disabled>오른쪽</button>
+                  </span><label for="clip-editor-audio-pan">으로 패닝</label>
+                </span>
+              </div>
             </div>
           </div>
         </fieldset>

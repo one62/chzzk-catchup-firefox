@@ -77,7 +77,7 @@ function setup(initialState = "running") {
   };
 }
 
-test("editor panning uses playback latency hint, pans right, bypasses on dispose and reuses the source", () => {
+test("editor panning uses playback latency hint, pans left or right at 0.4, updates live, bypasses and reuses source", () => {
   const { create, sources, pannings, destination, contextOptions } = setup();
   const video = makeVideo();
   const effect = create(video);
@@ -85,15 +85,20 @@ test("editor panning uses playback latency hint, pans right, bypasses on dispose
   assert.equal(contextOptions[0]?.latencyHint, "playback");
   assert.equal(sources.length, 1);
   assert.equal(pannings.length, 1);
-  assert.equal(pannings[0].pan.value, 0.55);
+  assert.equal(pannings[0].pan.value, 0.4);
   assert.equal(sources[0].output, pannings[0]);
   assert.equal(pannings[0].output, destination);
+  effect.setSide("left");
+  assert.equal(pannings[0].pan.value, -0.4);
+  effect.setSide("right");
+  assert.equal(pannings[0].pan.value, 0.4);
   effect.dispose();
   assert.equal(sources[0].output, destination);
   assert.equal(pannings[0].output, null);
-  const reopened = create(video);
+  const reopened = create(video, { side: "left" });
   assert.equal(sources.length, 1);
   assert.equal(pannings.length, 2);
+  assert.equal(pannings[1].pan.value, -0.4);
   assert.equal(sources[0].output, pannings[1]);
   assert.equal(pannings[1].output, destination);
   reopened.dispose();

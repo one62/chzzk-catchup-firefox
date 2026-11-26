@@ -124,8 +124,19 @@ h2 { margin: 0 0 14px; font-size: 14px; font-weight: 700; }
 .clip-help { margin: 0; }
 .clip-audio-options { margin-top: 8px; }
 .clip-audio-effect { margin-inline-start: 22px; }
-.clip-audio-effect label:has(input:disabled) { opacity: .55; }
+.clip-audio-effect label:has(input:disabled),
+.clip-pan-row:has(#clip-editor-audio-pan:disabled) { opacity: .55; }
 .clip-audio-options label { display: flex; align-items: center; gap: 6px; min-height: 28px; font-size: 12px; }
+.clip-pan-row { display: flex; align-items: center; gap: 6px; min-height: 28px; font-size: 12px; }
+.clip-pan-text { line-height: 1.5; }
+.clip-pan-text label { display: inline; min-height: 0; font-size: inherit; }
+.clip-pan-side { display: inline-flex; align-items: baseline; white-space: nowrap; }
+.clip-pan-side button { border: 0; padding: 0 2px; border-radius: 3px; background: transparent; color: #93a4ac; font: inherit; font-weight: 500; }
+.clip-pan-side button:hover:not(:disabled) { color: #e8f0f2; }
+.clip-pan-side button[aria-pressed="true"] { color: #d4c2ea; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.clip-pan-side button:focus-visible { outline: 2px solid #d4c2ea; outline-offset: 1px; }
+.clip-pan-side button:disabled { opacity: 1; }
+.clip-pan-sep { color: #6f8088; margin: 0 1px; }
 .clip-audio-options input { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: #cbb0e3; }
 .clip-audio-options input:focus-visible { outline: 2px solid #d4c2ea; outline-offset: 2px; }
 .chat-group { margin-top: 18px; }

@@ -1,11 +1,16 @@
 (() => {
   "use strict";
 
+  const PAN_AMOUNT = 0.4;
   // Firefox allows a single source node per element. Reuse it after bypassing.
   let sources = new WeakMap();
   let context;
   let hasSource = false;
   let activeEffects = 0;
+
+  function panValue(side) {
+    return side === "left" ? -PAN_AMOUNT : PAN_AMOUNT;
+  }
 
   function onPageHide(event) {
     if (event?.persisted === false) closeContext();
@@ -76,14 +81,14 @@
     }
   }
 
-  function create(video, { canAttach = () => true, onError, onCancel } = {}) {
+  function create(video, { side = "right", canAttach = () => true, onError, onCancel } = {}) {
     if (!isReadyForPlayback(video) || !canAttach()) {
       throw new Error("재생 준비가 완료되지 않은 미디어입니다.");
     }
     checkSourceOrigin(video);
     const ctx = getContext();
     const pan = ctx.createStereoPanner();
-    pan.pan.value = 0.55;
+    pan.pan.value = panValue(side);
     let source;
     let disposed = false;
 
@@ -151,7 +156,12 @@
       resume();
     }
 
-    return { dispose };
+    return {
+      setSide(nextSide) {
+        if (!disposed) pan.pan.value = panValue(nextSide);
+      },
+      dispose,
+    };
   }
 
   globalThis.ClipAudioEffects = { create, isSupportedSource };
