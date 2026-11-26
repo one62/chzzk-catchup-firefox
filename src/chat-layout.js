@@ -14,6 +14,14 @@
   let frame;
   let player;
   let layout;
+  let appliedHeight = null;
+
+  function setChatHeight(root, value) {
+    if (appliedHeight === value) return;
+    appliedHeight = value;
+    if (value === null) root.style.removeProperty(heightProperty);
+    else root.style.setProperty(heightProperty, value);
+  }
 
   function fitChatHeight() {
     frame = undefined;
@@ -31,7 +39,7 @@
 
     const root = document.documentElement;
     if (!chat || !player || document.fullscreenElement) {
-      root.style.removeProperty(heightProperty);
+      setChatHeight(root, null);
       return;
     }
 
@@ -42,10 +50,10 @@
     }
     const available = root.clientHeight - top;
     if (available > 0) {
-      root.style.setProperty(heightProperty, `${Math.max(minimumHeight, available)}px`);
+      setChatHeight(root, `${Math.max(minimumHeight, available)}px`);
     } else {
       // If the video fills the window, leave chat available by scrolling down.
-      root.style.removeProperty(heightProperty);
+      setChatHeight(root, null);
     }
   }
 
@@ -55,12 +63,16 @@
 
   function affectsLayout(record) {
     const target = record.target;
-    if (record.attributeName === "class") return target.matches(chatSelector);
-    const chat = target.closest?.(chatSelector);
-    if (record.attributeName === "role") {
-      return chat?.id === "vod-aside" && target !== chat &&
-        (target.matches(vodLogSelector) || record.oldValue === "log");
+    if (record.attributeName === "class") {
+      return target.id === "aside-chatting" || target.id === "vod-aside";
     }
+    if (record.attributeName === "role") {
+      if (record.oldValue !== "log" && !target.matches?.(vodLogSelector)) return false;
+      const chat = target.closest?.(chatSelector);
+      return chat?.id === "vod-aside" && target !== chat;
+    }
+    if (player?.isConnected && target !== player && player.contains?.(target)) return false;
+    const chat = target.closest?.(chatSelector);
     if (!chat) return true;
     if (chat.id !== "vod-aside") return false;
     return [...record.addedNodes, ...record.removedNodes].some(node =>
@@ -91,7 +103,7 @@
       document.removeEventListener("fullscreenchange", scheduleFit);
       if (frame !== undefined) cancelAnimationFrame(frame);
       frame = undefined;
-      root.style.removeProperty(heightProperty);
+      setChatHeight(root, null);
     }
   }
 

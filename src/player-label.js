@@ -33,15 +33,20 @@
     return null;
   }
 
-  function applyTypography(label, native) {
+  function resolveTypographyTarget(native) {
+    return native.querySelector(".live_time_text, .pzp-live-time__text") || native;
+  }
+
+  function applyTypography(label, nativeText) {
     // Native LIVE text is 13px / 16px inside a 36px flex-centered button.
     // The bottom row also centers its flex items. Matching the text metrics
     // aligns our line box with it without a positional pixel correction.
-    const nativeText = native.querySelector(".live_time_text, .pzp-live-time__text") || native;
-    const style = native.ownerDocument.defaultView?.getComputedStyle?.(nativeText);
+    const style = nativeText.ownerDocument.defaultView?.getComputedStyle?.(nativeText);
     if (!style) return;
     for (const property of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "letterSpacing"]) {
-      if (style[property]) label.style[property] = style[property];
+      if (style[property] && label.style[property] !== style[property]) {
+        label.style[property] = style[property];
+      }
     }
   }
 
@@ -51,14 +56,16 @@
 
   function create({ getVideo, getLatency, getBuffer = () => null, getConnection = () => null }) {
     let label = null;
+    let styledTarget = null;
     let destroyed = false;
 
     function remove() {
       label?.remove();
       label = null;
+      styledTarget = null;
     }
 
-    function update() {
+    function update({ syncTypography = true } = {}) {
       if (destroyed) return;
       const target = findAnchor(getVideo());
       if (!target) {
@@ -67,6 +74,7 @@
       }
       const { player, controls, anchor, native, visibilityClass } = target;
       if (label && label.parentElement !== controls) remove();
+      let created = false;
       if (!label) {
         label = controls.querySelector(`.${LABEL_CLASS}`) ||
           anchor.ownerDocument.createElement("span");
@@ -74,10 +82,18 @@
         label.style.cssText = "margin-inline-start:8px;" +
           "font:inherit;font-size:13px;line-height:16px;color:inherit;" +
           "white-space:nowrap;pointer-events:none;font-variant-numeric:tabular-nums;flex-shrink:0";
+        styledTarget = null;
+        created = true;
       }
-      applyTypography(label, native);
-      for (const duplicate of player.querySelectorAll(`.${LABEL_CLASS}`)) {
-        if (duplicate !== label) duplicate.remove();
+      const typographyTarget = resolveTypographyTarget(native);
+      if (syncTypography || styledTarget !== typographyTarget) {
+        applyTypography(label, typographyTarget);
+        styledTarget = typographyTarget;
+      }
+      if (created || syncTypography) {
+        for (const duplicate of player.querySelectorAll(`.${LABEL_CLASS}`)) {
+          if (duplicate !== label) duplicate.remove();
+        }
       }
       // CHZZK fades individual controls, not their containing button row.
       // Its live_time (service CSS) / pzp-pc__live-time (vendor CSS) classes

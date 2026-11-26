@@ -2,37 +2,196 @@
   "use strict";
 
   const isEditor = pathname => /^\/clip-editor\/?$/.test(pathname);
+  const media = globalThis.ChzzkCatchupMedia;
+
+  // CHZZK opens the clip editor in its own window/tab. Keep Web Audio strictly
+  // inside /clip-editor so live broadcast tabs stay on native audio playback.
   if (isEditor(location.pathname)) {
-    // The main-world script handles editors with a DOM opener.
-    if (window.opener) return;
-    let port;
+    let port = null;
+    let usePan = false;
+    let settingsRevision = 0;
+    let pageHidden = false;
+    let panVideo = null;
+    let panSourceKey = null;
+    let panEngine = null;
+    let failedVideo = null;
+    let failedSourceKey = null;
+
+    function sourceKey(video) {
+      return `${video?.currentSrc || ""}|${video?.srcObject ? "stream" : ""}`;
+    }
+
+    function disconnectPort() {
+      port?.disconnect();
+      port = null;
+    }
+
     function connect() {
-      if (port || !isEditor(location.pathname)) return;
+      // The main-world script handles editors with a DOM opener.
+      if (pageHidden || window.opener || port || !isEditor(location.pathname)) return;
       port = browser.runtime.connect({ name: "clip-audio-editor" });
       port.onDisconnect.addListener(() => { port = null; });
     }
-    window.addEventListener("pageshow", connect);
+
+    function stopPan() {
+      const active = panEngine;
+      panEngine = null;
+      panVideo = null;
+      panSourceKey = null;
+      active?.dispose();
+      failedVideo = null;
+      failedSourceKey = null;
+    }
+
+    function isSupportedSource(video) {
+      return typeof ClipAudioEffects?.isSupportedSource === "function"
+        ? ClipAudioEffects.isSupportedSource(video)
+        : true;
+    }
+
+    function syncPan(event) {
+      if (pageHidden || !usePan || !isEditor(location.pathname)) {
+        if (panEngine || panVideo) stopPan();
+        return;
+      }
+      if (event?.target === panVideo && panEngine && panVideo?.isConnected) {
+        if (event.type === "emptied") {
+          stopPan();
+          return;
+        }
+        const key = sourceKey(panVideo);
+        if (key === panSourceKey) return;
+        if (!isSupportedSource(panVideo)) {
+          const failed = panVideo;
+          stopPan();
+          failedVideo = failed;
+          failedSourceKey = key;
+          console.warn("[CHZZK Catch-up] 지원하지 않는 외부 미디어로 전환되어 클립 편집기 패닝을 중단합니다.");
+          return;
+        }
+        panSourceKey = key;
+        return;
+      }
+      const video = media.findMainVideo(panVideo);
+      if (!video) {
+        if (panEngine || panVideo) stopPan();
+        return;
+      }
+      if (panEngine && video !== panVideo) stopPan();
+      const key = sourceKey(video);
+      if (!isSupportedSource(video)) {
+        failedVideo = video;
+        failedSourceKey = key;
+        return;
+      }
+      if (panEngine) {
+        panSourceKey = key;
+        return;
+      }
+      if (video.readyState < 1 || video.paused === true) return;
+      if (failedVideo === video && failedSourceKey === key) return;
+      try {
+        let settled = false;
+        let created;
+        created = ClipAudioEffects.create(video, {
+          canAttach: () => !pageHidden && usePan && isEditor(location.pathname),
+          onCancel() {
+            settled = true;
+            if (panEngine === created) {
+              panEngine = null;
+              panVideo = null;
+              panSourceKey = null;
+            }
+          },
+          onError() {
+            settled = true;
+            failedVideo = video;
+            failedSourceKey = sourceKey(video);
+            if (panEngine === created) {
+              panEngine = null;
+              panVideo = null;
+              panSourceKey = null;
+            }
+          },
+        });
+        if (!settled) {
+          panEngine = created;
+          panVideo = video;
+          panSourceKey = key;
+          failedVideo = null;
+          failedSourceKey = null;
+        }
+      } catch (error) {
+        failedVideo = video;
+        failedSourceKey = key;
+        console.warn("[CHZZK Catch-up] 클립 편집기 음향 패닝을 적용할 수 없습니다.", error);
+      }
+    }
+
+    function loadEditorSettings() {
+      if (pageHidden) return;
+      const revision = ++settingsRevision;
+      browser.storage.local.get({
+        clipEnabled: true, clipKeepLiveAudio: false, clipEditorAudioPan: false,
+      }).then(settings => {
+        if (pageHidden || revision !== settingsRevision) return;
+        usePan = settings.clipEnabled !== false &&
+          settings.clipKeepLiveAudio === true &&
+          settings.clipEditorAudioPan === true;
+        syncPan();
+      }).catch(() => {});
+    }
+
+    for (const name of ["loadedmetadata", "canplay", "play", "playing", "emptied"]) {
+      document.addEventListener(name, event => {
+        if (name === "emptied" && event?.target === failedVideo) {
+          failedVideo = null;
+          failedSourceKey = null;
+        }
+        syncPan(event);
+      }, true);
+    }
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (!["clipEnabled", "clipKeepLiveAudio", "clipEditorAudioPan"].some(key => key in changes)) return;
+      const disabledByChange = (key, defaultTrue = false) => {
+        const change = changes[key];
+        if (!change || (!Object.hasOwn(change, "newValue") && !Object.hasOwn(change, "oldValue"))) return false;
+        return defaultTrue ? change.newValue === false : change.newValue !== true;
+      };
+      if (disabledByChange("clipEnabled", true) ||
+          disabledByChange("clipKeepLiveAudio") ||
+          disabledByChange("clipEditorAudioPan")) {
+        usePan = false;
+        stopPan();
+      }
+      loadEditorSettings();
+    });
+    window.addEventListener("pageshow", () => {
+      pageHidden = false;
+      connect();
+      loadEditorSettings();
+    });
     window.addEventListener("pagehide", () => {
-      port?.disconnect();
-      port = null;
+      pageHidden = true;
+      usePan = false;
+      settingsRevision++;
+      stopPan();
+      disconnectPort();
     });
     connect();
+    loadEditorSettings();
     return;
   }
 
   const editors = new Map();
   const clickSnapshotMs = 1200;
   const editorSnapshotMs = 20000;
-  const media = globalThis.ChzzkCatchupMedia;
   const isLive = () => /^\/live\/[^/]+\/?$/.test(location.pathname);
   let keepAudio = false;
-  let useEffect = false;
-  let usePan = false;
   let settingsRevision = 0;
   let beforeOpen = null;
   let player = null;
-  let engine = null;
-  let failedVideo = null;
   let originalMuted = false;
   let nativeMuted = false;
   let writtenMute = null;
@@ -50,11 +209,25 @@
       time - beforeOpen.time < maxAge;
   }
 
+  function isEditableTarget(target) {
+    if (!target || typeof target !== "object") return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  }
+
+  function isActivationKey(key) {
+    return key === "Enter" || key === " " || key === "Spacebar";
+  }
+
   // The site's click handler can mute the broadcast before the editor connects.
   function rememberMute(event) {
     if (!event.isTrusted || !isLive()) return;
     if (editors.size) {
       muteGraceUntil = 0;
+      return;
+    }
+    if (event.type === "keydown" && (isEditableTarget(event.target) || !isActivationKey(event.key))) {
       return;
     }
     const video = mainVideo();
@@ -93,12 +266,6 @@
         Date.now() >= muteGraceUntil) writtenMute = null;
   }, true);
 
-  function stopEffect() {
-    engine?.dispose();
-    engine = null;
-    failedVideo = null;
-  }
-
   function restoreMute(muted) {
     if (player && writtenMute !== null && player.muted === writtenMute) {
       player.muted = muted;
@@ -113,7 +280,6 @@
     if (next === player) return;
     restoreMute(originalMuted);
     writtenMute = null;
-    stopEffect();
     player = next;
     if (!player) return;
     const recentSnapshot = hasRecentSnapshot(player, Date.now(), editorSnapshotMs);
@@ -160,7 +326,6 @@
     if (!player) return;
     if (!keepAudio) {
       if (managingMute || writtenMute === false) restoreMute(nativeMuted);
-      stopEffect();
       return;
     }
     if (!managingMute) {
@@ -171,14 +336,6 @@
       nativeMuted = true;
       player.muted = false;
       writtenMute = false;
-    }
-
-    if ((!useEffect && !usePan) || engine || failedVideo === player || player.readyState < 1) return;
-    try {
-      engine = ClipAudioEffects.create(player, { useEffect, usePan });
-    } catch (error) {
-      failedVideo = player;
-      console.warn("[CHZZK Catch-up] 생방송 음향 특수효과를 적용할 수 없습니다.", error);
     }
   }
 
@@ -218,15 +375,9 @@
 
   function loadSettings() {
     const revision = ++settingsRevision;
-    browser.storage.local.get({ clipEnabled: true, clipKeepLiveAudio: false, clipLiveAudioEffect: false,
-      clipLiveAudioPan: false }).then(settings => {
+    browser.storage.local.get({ clipEnabled: true, clipKeepLiveAudio: false }).then(settings => {
       if (revision !== settingsRevision) return;
       keepAudio = settings.clipEnabled !== false && settings.clipKeepLiveAudio === true;
-      const nextEffect = settings.clipLiveAudioEffect === true;
-      const nextPan = settings.clipLiveAudioPan === true;
-      if (nextEffect !== useEffect || nextPan !== usePan) stopEffect();
-      useEffect = nextEffect;
-      usePan = nextPan;
       if (keepAudio && !watchingClipOpen) {
         ClipAudioOpen.install(() => keepAudio && isLive(), mainVideo, rememberClipOpen, recordPreventedMute);
         watchingClipOpen = true;
@@ -235,8 +386,7 @@
     }).catch(() => {});
   }
   browser.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && ["clipEnabled", "clipKeepLiveAudio", "clipLiveAudioEffect", "clipLiveAudioPan"]
-      .some(key => key in changes)) {
+    if (area === "local" && ["clipEnabled", "clipKeepLiveAudio"].some(key => key in changes)) {
       loadSettings();
     }
   });

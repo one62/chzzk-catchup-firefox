@@ -355,3 +355,74 @@ test("connection kind appears beside latency and buffer on the same fading nativ
   assert.equal(f.labels().length, 1);
   assert.match(f.labels()[0].textContent, / · HLS$/);
 });
+
+test("frequent updates skip redundant computed style reads and unchanged style writes", () => {
+  const f = fixture();
+  let computedCalls = 0;
+  let fontSizeWrites = 0;
+  let fontSizeValue = "";
+  const metrics = { fontFamily: "Native Font", fontSize: "13px", fontWeight: "500",
+    fontStyle: "normal", lineHeight: "16px", letterSpacing: "0px" };
+  f.document.defaultView = {
+    getComputedStyle() {
+      computedCalls += 1;
+      return metrics;
+    },
+  };
+  f.label.update({ syncTypography: false });
+  assert.equal(computedCalls, 1);
+
+  const label = f.labels()[0];
+  fontSizeValue = label.style.fontSize;
+  Object.defineProperty(label.style, "fontSize", {
+    get: () => fontSizeValue,
+    set: (value) => { fontSizeWrites += 1; fontSizeValue = value; },
+    configurable: true,
+  });
+
+  f.setLatency(2.5);
+  f.label.update({ syncTypography: false });
+  assert.equal(computedCalls, 1);
+  assert.equal(fontSizeWrites, 0);
+  assert.equal(label.textContent, "지연 2.50초 · 버퍼 2.35초");
+
+  f.label.update({ syncTypography: true });
+  assert.equal(computedCalls, 2);
+  assert.equal(fontSizeWrites, 0);
+
+  metrics.fontSize = "15px";
+  f.label.update({ syncTypography: true });
+  assert.equal(computedCalls, 3);
+  assert.equal(fontSizeWrites, 1);
+  assert.equal(label.style.fontSize, "15px");
+
+  f.native.remove();
+  const nextNative = new Element("button", f.document, "live_time");
+  nextNative.textContent = "실시간";
+  f.controls.appendChild(nextNative);
+  metrics.fontSize = "16px";
+  f.label.update({ syncTypography: false });
+  assert.equal(computedCalls, 4);
+  assert.equal(label.style.fontSize, "16px");
+
+  const innerA = new Element("span", f.document, "live_time_text");
+  innerA.textContent = "실시간";
+  nextNative.textContent = "";
+  nextNative.appendChild(innerA);
+  metrics.fontSize = "17px";
+  f.label.update({ syncTypography: false });
+  assert.equal(computedCalls, 5);
+  assert.equal(label.style.fontSize, "17px");
+
+  f.label.update({ syncTypography: false });
+  assert.equal(computedCalls, 5);
+
+  innerA.remove();
+  const innerB = new Element("span", f.document, "live_time_text");
+  innerB.textContent = "실시간";
+  nextNative.appendChild(innerB);
+  metrics.fontSize = "18px";
+  f.label.update({ syncTypography: false });
+  assert.equal(computedCalls, 6);
+  assert.equal(label.style.fontSize, "18px");
+});

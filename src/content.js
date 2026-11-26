@@ -660,10 +660,14 @@
     return { ok: true, status: status() };
   }
 
-  function render() {
+  function render(syncTypography = false) {
     displayMetrics();
-    label.update();
+    label.update({ syncTypography });
     rateIndicator.update();
+  }
+
+  function renderWithTypography() {
+    render(true);
   }
 
   browser.runtime.onMessage.addListener((message) => {
@@ -722,6 +726,7 @@
     render();
   });
 
+  let typographyTick = 0;
   const timer = setInterval(() => {
     if (pageSuspended) return;
     if (!settingsReady && monotonicNow() >= settingsRetryAt) void loadSettings();
@@ -729,7 +734,8 @@
     refreshVideo();
     void inspectStream();
     readLatency();
-    render();
+    typographyTick = (typographyTick + 1) % 5;
+    render(typographyTick === 0);
   }, 1000);
   const autoTimer = setInterval(() => {
     if (!catchupEnabled) return;
@@ -752,7 +758,7 @@
     pageSuspended = false;
     refreshVideo();
     readLatency();
-    render();
+    render(true);
   });
   window.addEventListener("unload", () => {
     for (const request of streamRequests.values()) {
@@ -762,15 +768,17 @@
     streamRequests.clear();
     clearInterval(timer);
     clearInterval(autoTimer);
+    document.fonts?.removeEventListener?.("loadingdone", renderWithTypography);
     stopAuto("unload");
     if (pendingSeek) clearTimeout(pendingSeek.timer);
     label.destroy();
     rateIndicator.destroy();
   }, { once: true });
-  for (const name of ["resize", "scroll", "fullscreenchange", "visibilitychange"]) {
-    (name === "resize" || name === "scroll" ? window : document)
-      .addEventListener(name, render, { passive: true });
+  for (const name of ["resize", "fullscreenchange", "visibilitychange"]) {
+    (name === "resize" ? window : document)
+      .addEventListener(name, renderWithTypography, { passive: true });
   }
+  document.fonts?.addEventListener?.("loadingdone", renderWithTypography);
   async function loadSettings() {
     settingsRetryAt = Infinity;
     pendingSettingsChanges = {};
@@ -792,7 +800,7 @@
     settingsReady = true;
     refreshVideo();
     readLatency();
-    render();
+    render(true);
   }
   void loadSettings();
 })();

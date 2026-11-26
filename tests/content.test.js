@@ -109,7 +109,7 @@ async function harness(overrides = {}, savedSettings = { autoEnabled: false }, o
   let storageListener;
   let labelOptions;
   let indicatorOptions;
-  const labelCalls = { updates: 0, destroys: 0 };
+  const labelCalls = { updates: 0, destroys: 0, syncTypography: [] };
   const indicatorCalls = { updates: 0, destroys: 0 };
   const timers = new Map();
   const element = makeVideo(overrides);
@@ -177,7 +177,7 @@ async function harness(overrides = {}, savedSettings = { autoEnabled: false }, o
       create: (options) => {
         labelOptions = options;
         return {
-          update: () => { labelCalls.updates += 1; },
+          update: (options) => { labelCalls.updates += 1; labelCalls.syncTypography.push(options?.syncTypography); },
           destroy: () => { labelCalls.destroys += 1; },
         };
       },
@@ -1629,4 +1629,27 @@ test("master switch releases owned speed and blocks actions without changing aut
   assert.equal((await app.send("catch-up")).ok, false);
   app.changeStorage({ catchupEnabled: true });
   assert.equal((await app.send("get-status")).status.autoEnabled, true);
+});
+
+test("scroll does not trigger label updates while resize and fullscreen resync typography", async () => {
+  const app = await harness();
+  app.labelCalls.syncTypography.length = 0;
+  const beforeScroll = app.labelCalls.updates;
+  app.window.emit("scroll");
+  assert.equal(app.labelCalls.updates, beforeScroll);
+
+  app.advance(250);
+  assert.ok(app.labelCalls.syncTypography.length > 0);
+  assert.ok(app.labelCalls.syncTypography.every(flag => flag === false));
+
+  app.labelCalls.syncTypography.length = 0;
+  app.window.emit("resize");
+  app.document.emit("fullscreenchange");
+  app.document.emit("visibilitychange");
+  assert.deepEqual(app.labelCalls.syncTypography, [true, true, true]);
+
+  app.labelCalls.syncTypography.length = 0;
+  app.advance(5000);
+  assert.equal(app.labelCalls.syncTypography.filter(flag => flag === true).length, 1);
+  assert.ok(app.labelCalls.syncTypography.filter(flag => flag === false).length >= 20);
 });

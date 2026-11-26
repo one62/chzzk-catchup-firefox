@@ -2,7 +2,7 @@
   const api = globalThis.browser || globalThis.chrome;
   const note = document.getElementById("feature-note");
   const width = document.getElementById("chat-width");
-  const defaults = { chatLayoutWidth: 1000, clipKeepLiveAudio: false, clipLiveAudioEffect: false, clipLiveAudioPan: false };
+  const defaults = { chatLayoutWidth: 1000, clipKeepLiveAudio: false, clipEditorAudioPan: false };
   const apply = new Map();
   const readError = "섹션 설정을 읽지 못했습니다. 다시 시도 중입니다.";
   let savedWidth = 1000;
@@ -14,8 +14,7 @@
   const keepAudio = document.getElementById("clip-keep-live-audio");
   const audioControls = [
     ["clipKeepLiveAudio", keepAudio],
-    ["clipLiveAudioEffect", document.getElementById("clip-live-audio-effect")],
-    ["clipLiveAudioPan", document.getElementById("clip-live-audio-pan")],
+    ["clipEditorAudioPan", document.getElementById("clip-editor-audio-pan")],
   ];
   const audioSettings = {};
   const audioWrites = new Set();
@@ -40,7 +39,7 @@
         audioSettings[key] = enabled;
         note.textContent = "";
       } catch {
-        note.textContent = "생방송 오디오 설정을 저장하지 못했습니다.";
+        note.textContent = "클립 오디오 설정을 저장하지 못했습니다.";
       } finally {
         audioWrites.delete(key);
         renderAudioControls();

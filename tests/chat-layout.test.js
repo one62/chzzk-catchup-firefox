@@ -201,3 +201,80 @@ test("replay chat is measured when its log changes, without refitting for ordina
   runFrame();
   assert.equal(fittedHeight, undefined);
 });
+
+test("chat layout skips redundant root height writes and ignores player-internal mutations", async () => {
+  let onMutation;
+  let frame;
+  let windowResized;
+  let setCount = 0;
+  let removeCount = 0;
+  let closestCalls = 0;
+  const control = { closest: () => { closestCalls++; return null; } };
+  const player = { isConnected: true, contains: node => node === control };
+  const layout = { scrollTop: 0, querySelector: () => player };
+  const chat = {
+    id: "aside-chatting",
+    parentElement: layout,
+    closest: () => layout,
+    getBoundingClientRect: () => ({ top: 350 }),
+  };
+
+  vm.runInNewContext(source, {
+    browser: { storage: {
+      local: { get: async defaults => ({ ...defaults, chatLayoutEnabled: true }) },
+      onChanged: { addListener() {} },
+    } },
+    document: {
+      querySelector: () => chat,
+      addEventListener() {},
+      documentElement: {
+        clientHeight: 800,
+        style: {
+          setProperty() { setCount++; },
+          removeProperty() { removeCount++; },
+        },
+        toggleAttribute() {},
+      },
+    },
+    window: {
+      addEventListener(type, listener) { if (type === "resize") windowResized = listener; },
+    },
+    ResizeObserver: class { observe() {} disconnect() {} },
+    MutationObserver: class {
+      constructor(callback) { onMutation = callback; }
+      observe() {}
+    },
+    requestAnimationFrame(callback) { frame = callback; return 1; },
+    matchMedia: () => ({ matches: true, addEventListener() {} }),
+  });
+
+  await Promise.resolve();
+  frame();
+  frame = undefined;
+  assert.equal(setCount, 1);
+  assert.equal(removeCount, 0);
+
+  windowResized();
+  frame();
+  frame = undefined;
+  assert.equal(setCount, 1);
+
+  onMutation([{ type: "childList", target: control, addedNodes: [], removedNodes: [] }]);
+  assert.equal(frame, undefined);
+
+  onMutation([{ type: "attributes", attributeName: "class", target: { id: "unrelated" } }]);
+  assert.equal(frame, undefined);
+
+  onMutation([{ type: "attributes", attributeName: "role", target: { matches: () => false, closest: () => { closestCalls++; return null; } }, oldValue: "button" }]);
+  assert.equal(frame, undefined);
+  assert.equal(closestCalls, 0);
+
+  onMutation([{ type: "attributes", attributeName: "class", target: chat }]);
+  assert.ok(frame);
+  const scheduled = frame;
+  frame = undefined;
+  scheduled();
+
+  onMutation([{ type: "childList", target: { closest: () => null }, addedNodes: [], removedNodes: [] }]);
+  assert.ok(frame);
+});
